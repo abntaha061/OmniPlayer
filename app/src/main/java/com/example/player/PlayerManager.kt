@@ -22,11 +22,51 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
+import android.content.BroadcastReceiver
+import android.content.Intent
+import android.content.IntentFilter
+import android.media.AudioManager
+import androidx.media3.common.C
+import androidx.media3.common.AudioAttributes
+import androidx.media3.session.MediaSession
 
 @OptIn(UnstableApi::class)
 class PlayerManager(private val context: Context) {
     
     private var exoPlayer: ExoPlayer? = null
+    private var mediaSession: MediaSession? = null
+    private var isNoisyReceiverRegistered = false
+
+    private val noisyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+                exoPlayer?.pause()
+            }
+        }
+    }
+
+    private fun registerNoisyReceiver() {
+        if (!isNoisyReceiverRegistered) {
+            try {
+                val filter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+                context.registerReceiver(noisyReceiver, filter)
+                isNoisyReceiverRegistered = true
+            } catch (e: Exception) {
+                Log.e("PlayerManager", "Failed to register noise receiver: ${e.message}")
+            }
+        }
+    }
+
+    private fun unregisterNoisyReceiver() {
+        if (isNoisyReceiverRegistered) {
+            try {
+                context.unregisterReceiver(noisyReceiver)
+                isNoisyReceiverRegistered = false
+            } catch (e: Exception) {
+                Log.e("PlayerManager", "Failed to unregister noise receiver: ${e.message}")
+            }
+        }
+    }
     
     // Equalizer, Bass & Spatializers
     private var equalizer: Equalizer? = null
@@ -93,9 +133,25 @@ class PlayerManager(private val context: Context) {
             exoPlayer = ExoPlayer.Builder(context, renderersFactory).build().apply {
                 repeatMode = Player.REPEAT_MODE_OFF
                 playWhenReady = true
+
+                // Enable Wake Lock for background playing capability
+                setWakeMode(C.WAKE_MODE_LOCAL)
+
+                // Configure standard movie/media audio attributes & auto audio focus management
+                val audioAttributes = AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                    .build()
+                setAudioAttributes(audioAttributes, true)
+
                 addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(playing: Boolean) {
                         _isPlaying.value = playing
+                        if (playing) {
+                            registerNoisyReceiver()
+                        } else {
+                            unregisterNoisyReceiver()
+                        }
                     }
 
                     override fun onPlaybackStateChanged(state: Int) {
@@ -104,6 +160,13 @@ class PlayerManager(private val context: Context) {
                         }
                     }
                 })
+            }
+
+            try {
+                mediaSession?.release()
+                mediaSession = MediaSession.Builder(context, exoPlayer!!).build()
+            } catch (e: Exception) {
+                Log.e("PlayerManager", "Failed to start MediaSession: ${e.message}")
             }
         }
         return exoPlayer!!
@@ -300,6 +363,10 @@ class PlayerManager(private val context: Context) {
     }
 
     fun release() {
+        unregisterNoisyReceiver()
+        mediaSession?.release()
+        mediaSession = null
+
         equalizer?.release()
         bassBoost?.release()
         virtualizer?.release()

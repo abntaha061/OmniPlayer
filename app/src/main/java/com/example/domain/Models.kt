@@ -21,7 +21,10 @@ data class MediaFile(
     var isFavorite: Boolean = false,
     val thumbnailUri: String = "",
     val subtitlePath: String = "",
-    val decoderMode: String = "AUTO"
+    val decoderMode: String = "AUTO",
+    val fps: Float = 30.0f,
+    val lastWatched: Long = 0L,
+    val isPrivate: Boolean = false
 ) {
     val isStream: Boolean get() = path.startsWith("http://") || path.startsWith("https://") || path.startsWith("rtsp://")
 }

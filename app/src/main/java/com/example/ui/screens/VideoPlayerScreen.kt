@@ -34,6 +34,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -95,6 +97,10 @@ fun VideoPlayerScreen(
         zoomScale = (zoomScale * zoomChange).coerceIn(1f, 5f)
     }
 
+    // A-B Repeat Loop State Variables
+    var pointA by remember { mutableStateOf<Long?>(null) }
+    var pointB by remember { mutableStateOf<Long?>(null) }
+
     // Audio & Video manager references
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     
@@ -143,6 +149,18 @@ fun VideoPlayerScreen(
         while (isPlaying) {
             playbackPosition.value = exoPlayer.currentPosition
             delay(200)
+        }
+    }
+
+    // A-B Repeat Loop Sync check
+    LaunchedEffect(playbackPosition.value) {
+        val a = pointA
+        val b = pointB
+        if (a != null && b != null) {
+            if (playbackPosition.value >= b || playbackPosition.value < a) {
+                exoPlayer.seekTo(a)
+                playbackPosition.value = a
+            }
         }
     }
 
@@ -216,6 +234,35 @@ fun VideoPlayerScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .transformable(state = transformableState)
+                .pointerInput(isScreenLocked) {
+                    if (isScreenLocked) return@pointerInput
+                    awaitPointerEventScope {
+                        while (true) {
+                            val down = awaitFirstDown()
+                            var isLongPressHeld = false
+                            val longPressTime = 500L
+                            val job = scope.launch {
+                                delay(longPressTime)
+                                isLongPressHeld = true
+                                exoPlayer.setPlaybackSpeed(2.0f)
+                                gestureIndicatorIcon = Icons.Default.FastForward
+                                gestureIndicatorValue = "2X Speed Active"
+                            }
+                            val up = waitForUpOrCancellation()
+                            job.cancel()
+                            if (isLongPressHeld) {
+                                exoPlayer.setPlaybackSpeed(1.0f)
+                                gestureIndicatorValue = "Normal Speed (1X)"
+                                scope.launch {
+                                    delay(1000)
+                                    if (gestureIndicatorValue == "Normal Speed (1X)") {
+                                        gestureIndicatorValue = null
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onDoubleTap = { offset ->
@@ -502,6 +549,28 @@ fun VideoPlayerScreen(
                             Icon(Icons.Default.Replay10, contentDescription = "Rewind 10s", tint = Color.White, modifier = Modifier.size(24.dp))
                         }
 
+                        // FRAME BY FRAME: Previous frame (appears when video is paused)
+                        if (!isPlaying) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            val frameStepMs = remember(currentMedia) {
+                                val fpsVal = currentMedia?.fps ?: 30f
+                                if (fpsVal > 0f) (1000f / fpsVal).toLong() else 33L
+                            }
+                            IconButton(
+                                onClick = {
+                                    val target = (exoPlayer.currentPosition - frameStepMs).coerceAtLeast(0L)
+                                    exoPlayer.seekTo(target)
+                                    playbackPosition.value = target
+                                },
+                                modifier = Modifier
+                                    .padding(8.dp)
+                                    .background(Color(0xFF00E5FF).copy(alpha = 0.20f), RoundedCornerShape(8.dp))
+                                    .size(44.dp)
+                            ) {
+                                Icon(Icons.Default.SkipPrevious, contentDescription = "Previous Frame", tint = Color(0xFF00E5FF), modifier = Modifier.size(20.dp))
+                            }
+                        }
+
                         IconButton(
                             onClick = { if (isPlaying) exoPlayer.pause() else exoPlayer.play() },
                             modifier = Modifier
@@ -516,6 +585,28 @@ fun VideoPlayerScreen(
                                 tint = Color.Black,
                                 modifier = Modifier.size(36.dp)
                             )
+                        }
+
+                        // FRAME BY FRAME: Next frame (appears when video is paused)
+                        if (!isPlaying) {
+                            val frameStepMs = remember(currentMedia) {
+                                val fpsVal = currentMedia?.fps ?: 30f
+                                if (fpsVal > 0f) (1000f / fpsVal).toLong() else 33L
+                            }
+                            IconButton(
+                                onClick = {
+                                    val target = (exoPlayer.currentPosition + frameStepMs).coerceAtMost(exoPlayer.duration)
+                                    exoPlayer.seekTo(target)
+                                    playbackPosition.value = target
+                                },
+                                modifier = Modifier
+                                    .padding(8.dp)
+                                    .background(Color(0xFF00E5FF).copy(alpha = 0.20f), RoundedCornerShape(8.dp))
+                                    .size(44.dp)
+                            ) {
+                                Icon(Icons.Default.SkipNext, contentDescription = "Next Frame", tint = Color(0xFF00E5FF), modifier = Modifier.size(20.dp))
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
                         }
 
                         IconButton(
@@ -565,6 +656,89 @@ fun VideoPlayerScreen(
                             ),
                             modifier = Modifier.testTag("player_seekbar")
                         )
+
+                        // A-B Repeat Controller loop panel option
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(32.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Point A button
+                            TextButton(
+                                onClick = {
+                                    pointA = exoPlayer.currentPosition
+                                    val b = pointB
+                                    if (b != null && b <= exoPlayer.currentPosition) {
+                                        pointB = null
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Adjust, 
+                                    contentDescription = null, 
+                                    tint = if (pointA != null) Color(0xFF00E5FF) else Color.White,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (pointA != null) "A: ${formatTime(pointA!!)}" else "SET A",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (pointA != null) Color(0xFF00E5FF) else Color.White
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            // Point B button
+                            TextButton(
+                                onClick = {
+                                    val a = pointA
+                                    if (a != null && exoPlayer.currentPosition > a) {
+                                        pointB = exoPlayer.currentPosition
+                                    } else if (a == null) {
+                                        pointA = 0L
+                                        pointB = exoPlayer.currentPosition
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Adjust, 
+                                    contentDescription = null, 
+                                    tint = if (pointB != null) Color(0xFF00E5FF) else Color.White,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (pointB != null) "B: ${formatTime(pointB!!)}" else "SET B",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (pointB != null) Color(0xFF00E5FF) else Color.White
+                                )
+                            }
+
+                            if (pointA != null || pointB != null) {
+                                Spacer(modifier = Modifier.width(16.dp))
+                                IconButton(
+                                    onClick = {
+                                        pointA = null
+                                        pointB = null
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh, 
+                                        contentDescription = "Clear A-B Repeat", 
+                                        tint = Color.Red,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
 
                         // Bottom Actions row
                         Row(

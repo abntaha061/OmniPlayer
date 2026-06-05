@@ -15,6 +15,7 @@ class MediaRepository(
     private val mediaDao: MediaDao
 ) {
     val allMedia: Flow<List<MediaFile>> = mediaDao.getAllMedia()
+    val privateMedia: Flow<List<MediaFile>> = mediaDao.getPrivateMedia()
     val favorites: Flow<List<MediaFile>> = mediaDao.getFavorites()
     val playlists: Flow<List<Playlist>> = mediaDao.getAllPlaylists()
     val watchHistory: Flow<List<WatchHistoryItem>> = mediaDao.getWatchHistory()
@@ -23,6 +24,8 @@ class MediaRepository(
     suspend fun getMediaById(id: Long): MediaFile? = mediaDao.getMediaById(id)
     
     suspend fun updateFavorite(id: Long, isFav: Boolean) = mediaDao.updateFavorite(id, isFav)
+
+    suspend fun updatePrivateState(id: Long, isPrivate: Boolean) = mediaDao.updatePrivateState(id, isPrivate)
 
     suspend fun updateResumePosition(id: Long, position: Long) = mediaDao.updateResumePosition(id, position)
 
@@ -61,6 +64,7 @@ class MediaRepository(
             )
         )
         mediaDao.updateResumePosition(mediaId, if (completed) 0 else progress)
+        mediaDao.updateLastWatched(mediaId, System.currentTimeMillis())
     }
 
     suspend fun clearHistory() = mediaDao.clearHistory()
@@ -177,7 +181,8 @@ class MediaRepository(
                 height = 2160,
                 videoCodec = "HEVC/H265",
                 audioCodec = "DTS/AC3 Stereo",
-                thumbnailUri = "https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?q=80&w=400"
+                thumbnailUri = "https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?q=80&w=400",
+                fps = 60.0f
             ),
             MediaFile(
                 id = 900002,
@@ -191,7 +196,8 @@ class MediaRepository(
                 height = 1080,
                 videoCodec = "AVC/H264",
                 audioCodec = "AAC Dual 2.0",
-                thumbnailUri = "https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=400"
+                thumbnailUri = "https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=400",
+                fps = 30.0f
             ),
             MediaFile(
                 id = 900003,
@@ -205,7 +211,8 @@ class MediaRepository(
                 height = 720,
                 videoCodec = "MPEG4",
                 audioCodec = "Dolby Digital Atmos",
-                thumbnailUri = "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=400"
+                thumbnailUri = "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=400",
+                fps = 24.0f
             ),
             MediaFile(
                 id = 900004,
@@ -219,7 +226,102 @@ class MediaRepository(
                 height = 1080,
                 videoCodec = "H264",
                 audioCodec = "Stereo AAC",
-                thumbnailUri = "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=400"
+                thumbnailUri = "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=400",
+                fps = 25.0f,
+                dateAdded = System.currentTimeMillis() - 7200000 // 2 hours ago -> Today
+            ),
+            MediaFile(
+                id = 900005,
+                path = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+                name = "Cosmic Voyage S01E01 - The Pioneer.mp4",
+                displayName = "Cosmic Voyage S01E01 - The Pioneer",
+                folderPath = "Sci-Fi Series/Season 01",
+                size = 62000000,
+                duration = 14000,
+                width = 1920,
+                height = 1080,
+                videoCodec = "AVC/H264",
+                audioCodec = "AAC 5.1",
+                thumbnailUri = "https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=400",
+                fps = 30.0f,
+                dateAdded = System.currentTimeMillis() - 95000000 // ~26 hours ago -> Yesterday
+            ),
+            MediaFile(
+                id = 900006,
+                path = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+                name = "Cosmic Voyage S01E02 - Dark Nebula.mp4",
+                displayName = "Cosmic Voyage S01E02 - Dark Nebula",
+                folderPath = "Sci-Fi Series/Season 01",
+                size = 59000000,
+                duration = 12000,
+                width = 1280,
+                height = 720,
+                videoCodec = "AVC/H264",
+                audioCodec = "AAC 5.1",
+                thumbnailUri = "https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?q=80&w=400",
+                fps = 24.0f,
+                dateAdded = System.currentTimeMillis() - (15 * 86400000L) // 15 days ago -> This Month
+            ),
+            MediaFile(
+                id = 900007,
+                path = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+                name = "Cosmic Voyage S02E01 - Andromeda's Edge.mp4",
+                displayName = "Cosmic Voyage S02E01 - Andromeda's Edge",
+                folderPath = "Sci-Fi Series/Season 02",
+                size = 71000000,
+                duration = 16000,
+                width = 1920,
+                height = 1080,
+                videoCodec = "AVC/H264",
+                audioCodec = "AAC Stereo",
+                thumbnailUri = "https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?q=80&w=400",
+                fps = 30.0f,
+                dateAdded = System.currentTimeMillis() - (45 * 86400000L) // 45 days ago -> Older
+            ),
+            MediaFile(
+                id = 900011,
+                path = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+                name = "SoundHelix Song 1 (Synth Chill)",
+                displayName = "SoundHelix Instrumental Vol. 1",
+                folderPath = "Aura Music Library",
+                size = 12500000,
+                duration = 372000, // 6:12
+                width = 0,
+                height = 0,
+                videoCodec = "Audio Only",
+                audioCodec = "MP3 Stereo 320kbps",
+                thumbnailUri = "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=400",
+                fps = 0.0f
+            ),
+            MediaFile(
+                id = 900012,
+                path = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
+                name = "SoundHelix Song 2 (Ambient Groove)",
+                displayName = "SoundHelix Instrumental Vol. 2",
+                folderPath = "Aura Music Library",
+                size = 10500000,
+                duration = 425000, // 7:05
+                width = 0,
+                height = 0,
+                videoCodec = "Audio Only",
+                audioCodec = "MP3 Stereo 320kbps",
+                thumbnailUri = "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=400",
+                fps = 0.0f
+            ),
+            MediaFile(
+                id = 900013,
+                path = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3",
+                name = "SoundHelix Song 4 (Epic Lofi Study)",
+                displayName = "SoundHelix Instrumental Vol. 4",
+                folderPath = "Aura Music Library",
+                size = 11200000,
+                duration = 302000, // 5:02
+                width = 0,
+                height = 0,
+                videoCodec = "Audio Only",
+                audioCodec = "MP3 Stereo 320kbps",
+                thumbnailUri = "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=400",
+                fps = 0.0f
             )
         )
     }

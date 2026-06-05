@@ -1,8 +1,14 @@
 package com.example.ui
 
 import android.app.Application
+import android.content.Context
 import android.os.CountDownTimer
 import android.util.Log
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKeys
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.AppDatabase
@@ -14,6 +20,8 @@ import com.example.player.PlayerManager
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
+private val Context.dataStore by preferencesDataStore(name = "aura_player_prefs")
+
 class MediaViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getDatabase(application)
@@ -22,6 +30,9 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
 
     // State flows
     val allMedia: StateFlow<List<MediaFile>> = repository.allMedia
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val privateMedia: StateFlow<List<MediaFile>> = repository.privateMedia
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val favorites: StateFlow<List<MediaFile>> = repository.favorites
@@ -45,6 +56,100 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setInPipMode(active: Boolean) {
         _isInPipMode.value = active
+    }
+
+    private val dataStore = application.dataStore
+    private val SORT_KEY = stringPreferencesKey("sort_key")
+    private val VIEW_MODE_KEY = stringPreferencesKey("view_mode_key")
+
+    val sortPref: StateFlow<String> = dataStore.data
+        .map { prefs -> prefs[SORT_KEY] ?: "Name" }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Name")
+
+    val viewModePref: StateFlow<String> = dataStore.data
+        .map { prefs -> prefs[VIEW_MODE_KEY] ?: "Folders" }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Folders")
+
+    fun updateSortPref(sort: String) {
+        viewModelScope.launch {
+            dataStore.edit { prefs -> prefs[SORT_KEY] = sort }
+        }
+    }
+
+    fun updateViewModePref(viewMode: String) {
+        viewModelScope.launch {
+            dataStore.edit { prefs -> prefs[VIEW_MODE_KEY] = viewMode }
+        }
+    }
+
+    // Secure Preferences for Private Folder PIN and Recovery Email
+    private val securePrefs by lazy {
+        try {
+            val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+
+            EncryptedSharedPreferences.create(
+                "secure_aura_player_prefs",
+                masterKeyAlias,
+                application,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            Log.e("MediaViewModel", "Error creating EncryptedSharedPreferences: ${e.message}")
+            application.getSharedPreferences("fallback_secure_prefs", Context.MODE_PRIVATE)
+        }
+    }
+
+    private val _isPrivateFolderLocked = MutableStateFlow(true)
+    val isPrivateFolderLocked: StateFlow<Boolean> = _isPrivateFolderLocked.asStateFlow()
+
+    fun lockPrivateFolder() {
+        _isPrivateFolderLocked.value = true
+    }
+
+    fun unlockPrivateFolder(pin: String): Boolean {
+        val savedPin = securePrefs.getString("private_pin", null)
+        if (savedPin == pin) {
+            _isPrivateFolderLocked.value = false
+            return true
+        }
+        return false
+    }
+
+    fun hasPrivatePin(): Boolean {
+        return securePrefs.getString("private_pin", null) != null
+    }
+
+    fun setPrivatePin(pin: String, recoveryEmail: String) {
+        securePrefs.edit()
+            .putString("private_pin", pin)
+            .putString("recovery_email", recoveryEmail)
+            .apply()
+        _isPrivateFolderLocked.value = false
+    }
+
+    fun getRecoveryEmail(): String? {
+        return securePrefs.getString("recovery_email", null)
+    }
+
+    fun checkRecoveryEmail(email: String): Boolean {
+        val savedEmail = securePrefs.getString("recovery_email", null)
+        return email.trim().equals(savedEmail?.trim(), ignoreCase = true)
+    }
+
+    fun resetPinWithRecovery(email: String, newPin: String): Boolean {
+        if (checkRecoveryEmail(email)) {
+            securePrefs.edit().putString("private_pin", newPin).apply()
+            _isPrivateFolderLocked.value = false
+            return true
+        }
+        return false
+    }
+
+    fun togglePrivateState(id: Long, isPrivate: Boolean) {
+        viewModelScope.launch {
+            repository.updatePrivateState(id, isPrivate)
+        }
     }
 
     // Searching and filtering

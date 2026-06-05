@@ -7,10 +7,13 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface MediaDao {
     // Media files
-    @Query("SELECT * FROM media_files ORDER BY dateAdded DESC")
+    @Query("SELECT * FROM media_files WHERE isPrivate = 0 ORDER BY dateAdded DESC")
     fun getAllMedia(): Flow<List<MediaFile>>
 
-    @Query("SELECT * FROM media_files WHERE isFavorite = 1 ORDER BY dateAdded DESC")
+    @Query("SELECT * FROM media_files WHERE isPrivate = 1 ORDER BY dateAdded DESC")
+    fun getPrivateMedia(): Flow<List<MediaFile>>
+
+    @Query("SELECT * FROM media_files WHERE isFavorite = 1 AND isPrivate = 0 ORDER BY dateAdded DESC")
     fun getFavorites(): Flow<List<MediaFile>>
 
     @Query("SELECT * FROM media_files WHERE id = :id LIMIT 1")
@@ -39,6 +42,12 @@ interface MediaDao {
 
     @Query("UPDATE media_files SET subtitlePath = :subtitlePath WHERE id = :id")
     suspend fun updateSubtitlePath(id: Long, subtitlePath: String)
+
+    @Query("UPDATE media_files SET isPrivate = :isPrivate WHERE id = :id")
+    suspend fun updatePrivateState(id: Long, isPrivate: Boolean)
+
+    @Query("UPDATE media_files SET lastWatched = :lastWatched WHERE id = :id")
+    suspend fun updateLastWatched(id: Long, lastWatched: Long)
 
     @Delete
     suspend fun deleteMedia(media: MediaFile)

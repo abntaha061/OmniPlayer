@@ -28,6 +28,9 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -148,6 +151,11 @@ class MainActivity : ComponentActivity() {
         } else {
             triggerPictureInPicture()
         }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        mediaViewModel?.lockPrivateFolder()
     }
 
     override fun onDestroy() {
@@ -286,7 +294,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainTabbedShell(viewModel: MediaViewModel) {
-    var selectedScreen by remember { mutableStateOf("home") }
+    var selectedScreen by remember { mutableStateOf("videos") }
 
     Scaffold(
         bottomBar = {
@@ -294,58 +302,45 @@ fun MainTabbedShell(viewModel: MediaViewModel) {
                 modifier = Modifier.testTag("bottom_nav_bar")
             ) {
                 NavigationBarItem(
-                    selected = selectedScreen == "home",
-                    onClick = { selectedScreen = "home" },
-                    icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
-                    label = { Text("Home") },
-                    modifier = Modifier.testTag("nav_item_home")
+                    selected = selectedScreen == "videos",
+                    onClick = { selectedScreen = "videos" },
+                    icon = { Icon(Icons.Default.PlayCircle, contentDescription = "Videos") },
+                    label = { Text("Videos") },
+                    modifier = Modifier.testTag("nav_item_videos")
                 )
                 NavigationBarItem(
-                    selected = selectedScreen == "browser",
-                    onClick = { selectedScreen = "browser" },
-                    icon = { Icon(Icons.Default.Folder, contentDescription = "Directory Library Explorer") },
-                    label = { Text("Browser") },
-                    modifier = Modifier.testTag("nav_item_browser")
-                )
-                NavigationBarItem(
-                    selected = selectedScreen == "playlists",
-                    onClick = { selectedScreen = "playlists" },
-                    icon = { Icon(Icons.Default.PlaylistPlay, contentDescription = "Smart Lists") },
-                    label = { Text("Playlists") },
-                    modifier = Modifier.testTag("nav_item_playlists")
+                    selected = selectedScreen == "music",
+                    onClick = { selectedScreen = "music" },
+                    icon = { Icon(Icons.Default.MusicNote, contentDescription = "Music tracks") },
+                    label = { Text("Music") },
+                    modifier = Modifier.testTag("nav_item_music")
                 )
                 NavigationBarItem(
                     selected = selectedScreen == "streams",
                     onClick = { selectedScreen = "streams" },
-                    icon = { Icon(Icons.Default.Wifi, contentDescription = "Network Link Inputs") },
+                    icon = { Icon(Icons.Default.Wifi, contentDescription = "Network & Streams") },
                     label = { Text("Streams") },
                     modifier = Modifier.testTag("nav_item_streams")
                 )
                 NavigationBarItem(
-                    selected = selectedScreen == "settings",
-                    onClick = { selectedScreen = "settings" },
-                    icon = { Icon(Icons.Default.Settings, contentDescription = "Engine Adjustments") },
-                    label = { Text("Settings") },
-                    modifier = Modifier.testTag("nav_item_settings")
+                    selected = selectedScreen == "me",
+                    onClick = { selectedScreen = "me" },
+                    icon = { Icon(Icons.Default.Person, contentDescription = "Stats, Settings and secure Vault") },
+                    label = { Text("Me") },
+                    modifier = Modifier.testTag("nav_item_me")
                 )
             }
         },
         modifier = Modifier.fillMaxSize()
     ) { innerPadding ->
         when (selectedScreen) {
-            "home" -> HomeScreen(
+            "videos" -> BrowserScreen(
                 viewModel = viewModel,
                 onSelectMedia = { viewModel.selectMedia(it) },
                 modifier = Modifier.padding(innerPadding)
             )
-            "browser" -> BrowserScreen(
+            "music" -> MusicScreen(
                 viewModel = viewModel,
-                onSelectMedia = { viewModel.selectMedia(it) },
-                modifier = Modifier.padding(innerPadding)
-            )
-            "playlists" -> PlaylistScreen(
-                viewModel = viewModel,
-                onSelectMedia = { viewModel.selectMedia(it) },
                 modifier = Modifier.padding(innerPadding)
             )
             "streams" -> StreamingScreen(
@@ -353,8 +348,9 @@ fun MainTabbedShell(viewModel: MediaViewModel) {
                 onSelectMedia = { viewModel.selectMedia(it) },
                 modifier = Modifier.padding(innerPadding)
             )
-            "settings" -> SettingsScreen(
+            "me" -> MeScreen(
                 viewModel = viewModel,
+                onSelectMedia = { viewModel.selectMedia(it) },
                 modifier = Modifier.padding(innerPadding)
             )
         }
