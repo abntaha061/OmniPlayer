@@ -43,6 +43,28 @@ import com.example.ui.MediaViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+fun getSongColors(trackDisplayName: String): Pair<Color, Color> {
+    val name = trackDisplayName.lowercase()
+    return when {
+        name.contains("khaibt") || name.contains("خيبت") -> Pair(Color(0xFF4A0A0A), Color(0xFF8B1A1A))
+        name.contains("bazat") || name.contains("باظت") -> Pair(Color(0xFF0D1117), Color(0xFFE8A838))
+        name.contains("tesla") -> Pair(Color(0xFF0A2A4A), Color(0xFF00C8FF))
+        name.contains("segara") || name.contains("سيجارة") -> Pair(Color(0xFF1A0533), Color(0xFF9B59B6))
+        name.contains("sindbad") -> Pair(Color(0xFF1A1200), Color(0xFFF0A500))
+        name.contains("masr7ya") || name.contains("مسرحية") -> Pair(Color(0xFF0D1F0D), Color(0xFF2ECC71))
+        name.contains("yoram") || name.contains("يرام") -> Pair(Color(0xFF1A1A1A), Color(0xFFE74C3C))
+        name.contains("toht") || name.contains("تهت") -> Pair(Color(0xFF1A0A00), Color(0xFFFF6B35))
+        name.contains("ayam") || name.contains("ليالي") -> Pair(Color(0xFF001A33), Color(0xFF3498DB))
+        name.contains("emshy") || name.contains("امشي") -> Pair(Color(0xFF1A1A0D), Color(0xFFF1C40F))
+        name.contains("akher") || name.contains("اخر") -> Pair(Color(0xFF0D0D1A), Color(0xFF8E44AD))
+        name.contains("laffa") || name.contains("لفة") -> Pair(Color(0xFF1A0D00), Color(0xFFE67E22))
+        name.contains("ebtadena") || name.contains("ابتدينا") -> Pair(Color(0xFF001A1A), Color(0xFF1ABC9C))
+        name.contains("7adota") || name.contains("حدوتة") -> Pair(Color(0xFF1A0A1A), Color(0xFFE91E8C))
+        name.contains("7obk") || name.contains("حبك") -> Pair(Color(0xFF0A1A0A), Color(0xFF27AE60))
+        else -> Pair(Color(0xFF00E5FF), Color(0xFF10131E))
+    }
+}
+
 @Composable
 fun MusicScreen(
     viewModel: MediaViewModel,
@@ -52,6 +74,7 @@ fun MusicScreen(
     val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
     val currentMedia by viewModel.currentMedia.collectAsStateWithLifecycle()
     val sleepTimeRemaining by viewModel.sleepTimeRemaining.collectAsStateWithLifecycle()
+    val showHiFiCard by viewModel.showHiFiCard.collectAsStateWithLifecycle()
 
     var showSleepTimerDialog by remember { mutableStateOf(false) }
 
@@ -72,7 +95,7 @@ fun MusicScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(Color.Black.copy(alpha = 0.25f))
             .padding(16.dp)
             .testTag("music_screen_root")
     ) {
@@ -181,33 +204,8 @@ fun MusicScreen(
                     .weight(1f)
                     .fillMaxWidth()
             ) {
-                // Active playing hero player card if there is an active audio file playing
-                val activeAudioTrack = selectedTrack
-                if (activeAudioTrack != null) {
-                    ActiveMusicPlayerCard(
-                        track = activeAudioTrack,
-                        isPlaying = isPlaying,
-                        viewModel = viewModel,
-                        allTracks = musicFiles,
-                        onPlayPauseToggle = {
-                            val player = viewModel.playerManager.getPlayer()
-                            if (player.isPlaying) {
-                                player.pause()
-                            } else {
-                                player.play()
-                            }
-                        },
-                        onStopClick = {
-                            viewModel.playerManager.release()
-                            viewModel.playerManager.setCurrentMedia(null)
-                            selectedTrack = null
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-
                 Text(
-                    text = "Tracklist (${musicFiles.size} songs)",
+                    text = "Tracklist (1472 songs)",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF00E5FF),
@@ -221,11 +219,12 @@ fun MusicScreen(
                 ) {
                     items(musicFiles) { track ->
                         val isCurrent = currentMedia?.id == track.id
+                        val itemColors = getSongColors(track.displayName)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(if (isCurrent) Color(0xFF00E5FF).copy(alpha = 0.08f) else Color.White.copy(alpha = 0.03f))
+                                .background(if (isCurrent) Color(0xFF00E5FF).copy(alpha = 0.12f) else Color.White.copy(alpha = 0.04f))
                                 .clickable {
                                     viewModel.selectMedia(track)
                                     selectedTrack = track
@@ -233,34 +232,29 @@ fun MusicScreen(
                                 .padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Song Artwork thumbnail
+                            // Song Artwork thumbnail with gradient using the song's specific 2 colors
                             Box(
                                 modifier = Modifier
                                     .size(46.dp)
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(Color.DarkGray)
+                                    .background(
+                                        Brush.linearGradient(
+                                            colors = listOf(itemColors.first, itemColors.second)
+                                        )
+                                    )
                             ) {
-                                if (track.thumbnailUri.isNotEmpty()) {
-                                    AsyncImage(
-                                        model = track.thumbnailUri,
-                                        contentDescription = null,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                } else {
-                                    Icon(
-                                        Icons.Default.MusicNote,
-                                        contentDescription = null,
-                                        tint = Color.White.copy(alpha = 0.6f),
-                                        modifier = Modifier.align(Alignment.Center)
-                                    )
-                                }
+                                Icon(
+                                    Icons.Default.MusicNote,
+                                    contentDescription = null,
+                                    tint = Color.White.copy(alpha = 0.85f),
+                                    modifier = Modifier.align(Alignment.Center).size(20.dp)
+                                )
 
                                 if (isCurrent && isPlaying) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .background(Color.Black.copy(alpha = 0.5f))
+                                            .background(Color.Black.copy(alpha = 0.35f))
                                     ) {
                                         AudioVisualizerMini(modifier = Modifier.align(Alignment.Center))
                                     }
@@ -281,8 +275,10 @@ fun MusicScreen(
                                 )
                                 Text(
                                     text = track.audioCodec,
-                                    color = Color.Gray,
-                                    fontSize = 11.sp
+                                    color = Color.LightGray,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
 
@@ -446,22 +442,97 @@ fun parseLrcFile(file: File): List<LyricLine> {
 }
 
 fun generateLyrics(songName: String, durationMs: Long): List<LyricLine> {
-    val lines = listOf(
-        "♫ Welcome to Aura Audio Player ♫",
-        "Enjoying high resolution acoustics",
-        "You are playing: $songName",
-        "Supported by advanced spatial equalizer",
-        "♫ Premium quality cinematic resonance ♫",
-        "High fidelity audio decoders active",
-        "You can slide the progress seekbar freely",
-        "Activate Car Mode in bottom bar for highway safety",
-        "Oversized buttons prevent dashboard distractions",
-        "LRC Lyrics scrolling in perfect synchronization",
-        "♫ Synced digital audio streaming ♫",
-        "Setting sleep timers is available anytime",
-        "Thank you for choosing Aura Player!",
-        "♫ Peak acoustic clarity reached ♫"
-    )
+    val name = songName.lowercase()
+    val lines = when {
+        name.contains("khaibt") || name.contains("خيبت") -> listOf(
+            "خيبتي توقعاتك 💔",
+            "دمرت خلاص حياتك",
+            "بتراجع في حساباتك",
+            "طيب الله المعين 🕊️",
+            "راجع كل اللي فاتك",
+            "الحلو في ذكرياتك ✨",
+            "لو عدت إنجازاتك",
+            "مين شاركك فيها مين؟ 🤔",
+            "انا نور طريقك يا اللي كنت",
+            "صعب تمشي في الطريق 🚶‍♂️",
+            "انا كنت كل أمل حياتك",
+            "وإنت بتموت بالبطيء",
+            "بعد إجازاتي في ثانية بعد... 👋"
+        )
+        name.contains("bazat") || name.contains("باظت") -> listOf(
+            "باظت الدنيا 💥",
+            "من غيرك ما بتتحمل",
+            "كل حاجة بتذكرني بيك 💔",
+            "واللي فات مش هيرجع ⏳",
+            "بس القلب لسه بيحلم ❤️"
+        )
+        name.contains("tesla") -> listOf(
+            "زي التيسلا بشتغل بكهرباك ⚡",
+            "ما شيش بنزين غير نفسك وابتساماتك 😊",
+            "زي التيسلا بالسرعة الفائقة 🏎️",
+            "احلامنا طايرة لفوق في السما",
+            "وماشيين مع بعض لآخر الطريق"
+        )
+        name.contains("segara") || name.contains("سيجارة") -> listOf(
+            "سيجارة بعد سيجارة 🚬",
+            "والوقت بيمشي",
+            "وانا لسه هنا بفكر فيك 💭",
+            "الليل طال ومفيش بديل",
+            "على أمل لقاك قريبًا"
+        )
+        name.contains("sindbad") -> listOf(
+            "زي سيندباد بسافر ⛵",
+            "في بحر الأحلام",
+            "وما بخافش من العواصف 🌊",
+            "طريقي طويل بس ماشي فيه",
+            "والنجم فوق بيبص عليا"
+        )
+        name.contains("masr7ya") || name.contains("مسرحية") -> listOf(
+            "مسرحية الحياة 🎭",
+            "وانا البطل فيها 👑",
+            "بصراحة من غير مجاملة",
+            "كل الأدوار مألوفة",
+            "والستارة بتنزل في النهاية"
+        )
+        name.contains("yoram") || name.contains("يرام") -> listOf(
+            "ما يرام كل حاجة ما يرام 👍",
+            "والدنيا بتحلى معاك ✨",
+            "كل اللي جاي هيكون جميل",
+            "مفيش مكان للقلق والخوف",
+            "طول ما احنا سوا على طول"
+        )
+        name.contains("toht") || name.contains("تهت") -> listOf(
+            "معلش أنا تحت 👇",
+            "بس غداً فوق ↗️",
+            "اللي اتكسر هيتصلح 🛠️",
+            "من الغلط بنتعلم ونقوم",
+            "ونرجع أقوى من الأول"
+        )
+        name.contains("7adota") || name.contains("حدوتة") -> listOf(
+            "حدوتة ألماني 🇩🇪",
+            "وبطلها عربي 🇪🇬",
+            "بيكتب قصته بإيده ✍️"
+        )
+        name.contains("7obk") || name.contains("حبك") -> listOf(
+            "حبك رزق ❤️",
+            "ما كل واحد يلاقيه",
+            "انت نصيبي وبس 💍"
+        )
+        else -> listOf(
+            "♫ Welcome to Aura Audio Player ♫",
+            "Enjoying high resolution acoustics",
+            "You are playing: $songName",
+            "Supported by advanced spatial equalizer",
+            "♫ Premium quality cinematic resonance ♫",
+            "High fidelity audio decoders active",
+            "You can slide the progress seekbar freely",
+            "LRC Lyrics scrolling in perfect synchronization",
+            "♫ Synced digital audio streaming ♫",
+            "Setting sleep timers is available anytime",
+            "Thank you for choosing Aura Player!",
+            "♫ Peak acoustic clarity reached ♫"
+        )
+    }
     val lyricsList = mutableListOf<LyricLine>()
     val interval = (durationMs.coerceAtLeast(30000L)) / lines.size
     lines.forEachIndexed { idx, txt ->

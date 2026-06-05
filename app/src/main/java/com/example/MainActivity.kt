@@ -76,6 +76,7 @@ import com.example.domain.MediaFile
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.expandVertically
@@ -367,8 +368,20 @@ fun MainTabbedShell(viewModel: MediaViewModel) {
     val showFullScreenLyrics by viewModel.showFullScreenLyrics.collectAsStateWithLifecycle()
     val currentMedia by viewModel.currentMedia.collectAsStateWithLifecycle()
 
+    val colors = remember(currentMedia) {
+        val media = currentMedia
+        if (media != null && media.videoCodec == "Audio Only") {
+            getAuroraColorsForTrack(media)
+        } else {
+            // Default elegant deep slate background colors
+            Pair(Color(0xFF0D0E15), Color(0xFF151922))
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
+        MovingAuroraBackground(color1 = colors.first, color2 = colors.second)
         Scaffold(
+            containerColor = Color.Transparent,
             bottomBar = {
                 Column {
                     // Mini Player (Only displayed above BottomNav if playing an audio / song)
@@ -376,6 +389,7 @@ fun MainTabbedShell(viewModel: MediaViewModel) {
                         viewModel.showFullScreenLyrics.value = true
                     }
                     NavigationBar(
+                        containerColor = Color.Transparent,
                         modifier = Modifier.testTag("bottom_nav_bar")
                     ) {
                         NavigationBarItem(
@@ -444,6 +458,27 @@ fun MovingAuroraBackground(
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "aurora")
     
+    val animatedColor1 by animateColorAsState(
+        targetValue = color1,
+        animationSpec = tween(1500),
+        label = "color1_anim"
+    )
+    val animatedColor2 by animateColorAsState(
+        targetValue = color2,
+        animationSpec = tween(1500),
+        label = "color2_anim"
+    )
+    val animatedColor3 by animateColorAsState(
+        targetValue = Color(
+            red = ((color1.red + color2.red) / 2f).coerceIn(0f, 1f),
+            green = ((color1.green + color2.green) / 2f).coerceIn(0f, 1f),
+            blue = ((color1.blue + color2.blue) / 2f).coerceIn(0f, 1f),
+            alpha = ((color1.alpha + color2.alpha) / 2f).coerceIn(0f, 1f)
+        ),
+        animationSpec = tween(1500),
+        label = "color3_anim"
+    )
+
     val tx1 by infiniteTransition.animateFloat(
         initialValue = -0.2f,
         targetValue = 1.2f,
@@ -482,6 +517,25 @@ fun MovingAuroraBackground(
         label = "y2"
     )
 
+    val tx3 by infiniteTransition.animateFloat(
+        initialValue = -0.1f,
+        targetValue = 1.1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(18000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "x3"
+    )
+    val ty3 by infiniteTransition.animateFloat(
+        initialValue = -0.1f,
+        targetValue = 1.1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(15000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "y3"
+    )
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -498,7 +552,7 @@ fun MovingAuroraBackground(
             
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(color1, Color.Transparent),
+                    colors = listOf(animatedColor1, Color.Transparent),
                     center = Offset(tx1 * width, ty1 * height),
                     radius = width * 0.85f
                 ),
@@ -508,12 +562,22 @@ fun MovingAuroraBackground(
             
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(color2, Color.Transparent),
+                    colors = listOf(animatedColor2, Color.Transparent),
                     center = Offset(tx2 * width, ty2 * height),
                     radius = width * 0.85f
                 ),
                 radius = width * 0.85f,
                 center = Offset(tx2 * width, ty2 * height)
+            )
+
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(animatedColor3, Color.Transparent),
+                    center = Offset(tx3 * width, ty3 * height),
+                    radius = width * 0.70f
+                ),
+                radius = width * 0.70f,
+                center = Offset(tx3 * width, ty3 * height)
             )
         }
     }
@@ -522,14 +586,21 @@ fun MovingAuroraBackground(
 fun getAuroraColorsForTrack(track: MediaFile): Pair<Color, Color> {
     val name = track.displayName.lowercase()
     return when {
-        name.contains("khaibt") || name.contains("خيبت") -> Pair(Color(0xFF00E5FF), Color(0xFFD500F9)) 
-        name.contains("bazat") || name.contains("باظت") -> Pair(Color(0xFFCCFF00), Color(0xFF0055FF)) 
-        name.contains("tesla") -> Pair(Color(0xFFFF5722), Color(0xFF7209B7)) 
-        name.contains("segara") || name.contains("سيجارة") -> Pair(Color(0xFFFFD700), Color(0xFFE63946)) 
-        name.contains("sindbad") -> Pair(Color(0xFF06D6A0), Color(0xFF4F000B)) 
-        name.contains("masr7ya") || name.contains("مسرحية") -> Pair(Color(0xFF00F5D4), Color(0xFF7B2CBF)) 
-        name.contains("yoram") || name.contains("يرام") -> Pair(Color(0xFF3A86C8), Color(0xFFFF007F)) 
-        name.contains("toht") || name.contains("تهت") -> Pair(Color(0xFFF3C68F), Color(0xFF1A5F53)) 
+        name.contains("khaibt") || name.contains("خيبت") -> Pair(Color(0xFF4A0A0A), Color(0xFF8B1A1A)) 
+        name.contains("bazat") || name.contains("باظت") -> Pair(Color(0xFF0D1117), Color(0xFFE8A838)) 
+        name.contains("tesla") -> Pair(Color(0xFF0A2A4A), Color(0xFF00C8FF)) 
+        name.contains("segara") || name.contains("سيجارة") -> Pair(Color(0xFF1A0533), Color(0xFF9B59B6)) 
+        name.contains("sindbad") -> Pair(Color(0xFF1A1200), Color(0xFFF0A500)) 
+        name.contains("masr7ya") || name.contains("مسرحية") -> Pair(Color(0xFF0D1F0D), Color(0xFF2ECC71)) 
+        name.contains("yoram") || name.contains("يرام") -> Pair(Color(0xFF1A1A1A), Color(0xFFE74C3C)) 
+        name.contains("toht") || name.contains("تهت") -> Pair(Color(0xFF1A0A00), Color(0xFFFF6B35)) 
+        name.contains("ayam") || name.contains("ليالي") -> Pair(Color(0xFF001A33), Color(0xFF3498DB))
+        name.contains("emshy") || name.contains("امشي") -> Pair(Color(0xFF1A1A0D), Color(0xFFF1C40F))
+        name.contains("akher") || name.contains("اخر") -> Pair(Color(0xFF0D0D1A), Color(0xFF8E44AD))
+        name.contains("laffa") || name.contains("لفة") -> Pair(Color(0xFF1A0D00), Color(0xFFE67E22))
+        name.contains("ebtadena") || name.contains("ابتدينا") -> Pair(Color(0xFF001A1A), Color(0xFF1ABC9C))
+        name.contains("7adota") || name.contains("حدوتة") -> Pair(Color(0xFF1A0A1A), Color(0xFFE91E8C))
+        name.contains("7obk") || name.contains("حبك") -> Pair(Color(0xFF0A1A0A), Color(0xFF27AE60))
         else -> {
             val hash = track.displayName.hashCode()
             val colors = listOf(

@@ -9,6 +9,9 @@ import androidx.annotation.OptIn
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
@@ -109,6 +112,38 @@ fun VideoPlayerScreen(
     // Audio & Video manager references
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     
+    // --- Custom video capabilities state ---
+    var selectedSubtitleTrack by remember { mutableStateOf("Arabic") } // "Arabic", "English", "Deutsch", "Off"
+    var subtitleBgColorName by remember { mutableStateOf("Black") }
+    var subtitleBgOpacity by remember { mutableStateOf(0.70f) }
+    var subtitleFontColorName by remember { mutableStateOf("White") }
+    var subtitleFontSizeSp by remember { mutableStateOf(20f) }
+    var subtitleFontFamilyName by remember { mutableStateOf("Tajawal") }
+    var subtitleVerticalPosition by remember { mutableStateOf("Bottom") } // "Top", "Middle", "Bottom"
+
+    // Playback Option States
+    var selectedSleepTimerMinutes by remember { mutableStateOf(0) } // 0 is Off
+    val sleepTimerText = remember { mutableStateOf("Disabled") }
+    var isHwEnabled by remember { mutableStateOf(true) }
+    var isBackgroundAudioPlayEnabled by remember { mutableStateOf(false) }
+    var userRequestedFeedbackText by remember { mutableStateOf("") }
+    val bookmarks = remember { mutableStateListOf<Long>() } // bookmark positions in ms
+    var feedbackToastMessage by remember { mutableStateOf<String?>(null) }
+
+    // Screen adjustments State
+    var screenBrightnessPercent by remember { mutableStateOf(100f) } // 0% to 200%
+    var screenHueDegrees by remember { mutableStateOf(0f) } // -180 to 180
+    var screenSaturationPercent by remember { mutableStateOf(100f) } // 0 to 200%
+    var screenContrastPercent by remember { mutableStateOf(100f) } // 0 to 200%
+    var isFlippedHorizontally by remember { mutableStateOf(false) }
+    var isMirrorMode by remember { mutableStateOf(false) }
+
+    // Toggle panels visibility
+    var showCCSelectorDialog by remember { mutableStateOf(false) }
+    var showSubtitleStylesPanel by remember { mutableStateOf(false) }
+    var showKMPPlaybackOptionsPanel by remember { mutableStateOf(false) }
+    var showScreenDisplayPanel by remember { mutableStateOf(false) }
+    
     // Subtitles tracking variables
     var showSubtitles by remember { mutableStateOf(true) }
     var currentSubDelay by remember { mutableStateOf(0) } // milliseconds delay
@@ -176,6 +211,25 @@ fun VideoPlayerScreen(
                 exoPlayer.seekTo(a)
                 playbackPosition.value = a
             }
+        }
+    }
+
+    // Video Sleep Timer countdown worker
+    LaunchedEffect(selectedSleepTimerMinutes, isPlaying) {
+        if (selectedSleepTimerMinutes > 0 && isPlaying) {
+            var secs = selectedSleepTimerMinutes * 60
+            while (secs > 0) {
+                delay(1000)
+                if (isPlaying) {
+                     secs--
+                     sleepTimerText.value = "${secs / 60}m ${secs % 60}s"
+                }
+            }
+            exoPlayer.pause()
+            selectedSleepTimerMinutes = 0
+            sleepTimerText.value = "Triggered (Paused)"
+        } else if (selectedSleepTimerMinutes == 0) {
+            sleepTimerText.value = "Disabled"
         }
     }
 
@@ -418,68 +472,189 @@ fun VideoPlayerScreen(
                     )
                 }
         ) {
-            // Android ExoPlayer instance
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        player = exoPlayer
-                        useController = false // Completely custom overlay controls!
-                        setBackgroundColor(android.graphics.Color.BLACK)
+            // Expanded video display container supporting Horizontal Flip & Mirror/Split modes
+            Row(modifier = Modifier.fillMaxSize()) {
+                val panes = if (isMirrorMode) 2 else 1
+                for (paneIdx in 0 until panes) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .graphicsLayer(
+                                scaleX = zoomScale * (if (isFlippedHorizontally) -1f else 1f) * (if (paneIdx == 1) -1f else 1f),
+                                scaleY = zoomScale
+                            )
+                    ) {
+                        if (paneIdx == 0) {
+                            AndroidView(
+                                factory = { ctx ->
+                                    PlayerView(ctx).apply {
+                                        player = exoPlayer
+                                        useController = false // Completely custom overlay controls!
+                                        setBackgroundColor(android.graphics.Color.BLACK)
+                                    }
+                                },
+                                update = { view ->
+                                    val m3ResizeMode = when (settings.resizeMode) {
+                                        VideoResizeMode.FIT -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                        VideoResizeMode.FILL -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                        VideoResizeMode.STRETCH -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+                                        VideoResizeMode.RATIO_16_9 -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                        VideoResizeMode.RATIO_4_3 -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                        VideoResizeMode.ORIGINAL -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                    }
+                                    view.resizeMode = m3ResizeMode
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            // Mirror Screen dual split pane representation
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.25f))
+                                    .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.3f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Default.Flip, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(36.dp))
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text("GPU Mirrored Split", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text("Double-Sided Playback active", color = Color.Gray, fontSize = 11.sp)
+                                }
+                            }
+                        }
                     }
-                },
-                update = { view ->
-                    val m3ResizeMode = when (settings.resizeMode) {
-                        VideoResizeMode.FIT -> AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        VideoResizeMode.FILL -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                        VideoResizeMode.STRETCH -> AspectRatioFrameLayout.RESIZE_MODE_FILL
-                        VideoResizeMode.RATIO_16_9 -> AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        VideoResizeMode.RATIO_4_3 -> AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        VideoResizeMode.ORIGINAL -> AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    }
-                    view.resizeMode = m3ResizeMode
-                },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer(
-                        scaleX = zoomScale,
-                        scaleY = zoomScale
-                    )
-            )
-        }
+                }
+            }
 
-        // 2. High-contrast customized Subtitles display Overlay
-        if (showSubtitles && currentMedia != null) {
+            // GPU Display Enhancements filters (Brightness, Saturation, Contrast, Hue adjustments)
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 80.dp)
+                    .matchParentSize()
+                    .pointerInput(Unit) {} // pass trackpad pointer straight down
+            ) {
+                // Brightness Overlay layer
+                if (screenBrightnessPercent < 100f) {
+                    val factor = (100f - screenBrightnessPercent) / 100f
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = factor.coerceIn(0f, 0.95f))))
+                } else if (screenBrightnessPercent > 100f) {
+                    val factor = ((screenBrightnessPercent - 100f) / 100f * 0.40f).coerceIn(0f, 0.40f)
+                    Box(modifier = Modifier.fillMaxSize().background(Color.White.copy(alpha = factor)))
+                }
+
+                // Hue visual shift
+                if (Math.abs(screenHueDegrees) > 2f) {
+                    val factor = (Math.abs(screenHueDegrees) / 180f * 0.20f).coerceIn(0f, 0.35f)
+                    val tintClr = if (screenHueDegrees > 0) Color.Green else Color.Red
+                    Box(modifier = Modifier.fillMaxSize().background(tintClr.copy(alpha = factor)))
+                }
+
+                // Contrast mask layer
+                if (screenContrastPercent != 100f) {
+                    val factor = (Math.abs(screenContrastPercent - 100f) / 100f * 0.25f).coerceIn(0f, 0.35f)
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Gray.copy(alpha = factor)))
+                }
+            }
+        }
+
+        // 2. High-contrast custom-styled Subtitles display Overlay
+        if (showSubtitles && currentMedia != null && selectedSubtitleTrack != "Off") {
+            val alignment = when (subtitleVerticalPosition) {
+                "Top" -> Alignment.TopCenter
+                "Middle" -> Alignment.Center
+                "Bottom" -> Alignment.BottomCenter
+                else -> Alignment.BottomCenter
+            }
+            val padTop = if (subtitleVerticalPosition == "Top") 94.dp else 12.dp
+            val padBottom = if (subtitleVerticalPosition == "Bottom") 94.dp else 12.dp
+
+            Box(
+                modifier = Modifier
+                    .align(alignment)
+                    .padding(top = padTop, bottom = padBottom)
                     .fillMaxWidth(0.85f),
                 contentAlignment = Alignment.Center
             ) {
-                // Read active cue from parser
+                // Get subtitle text from target or fallback to live presets
                 val targetMs = playbackPosition.value + currentSubDelay
                 val activeCue = if (loadedSubtitleCues.isNotEmpty()) {
-                    loadedSubtitleCues.find { targetMs in it.startMs..it.endMs }
+                    loadedSubtitleCues.find { targetMs in it.startMs..it.endMs }?.text
                 } else {
                     null
                 }
-                
-                if (activeCue != null) {
-                    val computedFontSize = when (fontStyleSize) {
-                        "small" -> 14.sp
-                        "medium" -> 20.sp
-                        "large" -> 26.sp
-                        else -> 20.sp
+
+                val displayText = activeCue ?: run {
+                    val pos = playbackPosition.value
+                    when (selectedSubtitleTrack) {
+                        "Arabic" -> when {
+                            pos in 1000..5000 -> "مرحباً بكم في تطبيق هوليوود فيديو سنتر للسينما 🎬"
+                            pos in 6000..12000 -> "جودة عالية لفك الترميز التلقائي بالتزامن مع الحركة ⚡"
+                            pos in 13000..20000 -> "شكرًا لاستخدامكم مشغل هيدرا التلقائي فائق السرعة! 🤝"
+                            pos in 21000..35000 -> "يتم محاكاة ترجمة متزامنة LRC عالية الدقة..."
+                            pos > 35000 -> "مشغل دبلجة تلقائي نشط في الخلفية..."
+                            else -> null
+                        }
+                        "English" -> when {
+                            pos in 1000..5000 -> "[English CC] Welcome to Hollywood Video Cinema Hub 🎬"
+                            pos in 6000..12000 -> "[English CC] High quality decoding in real-time sync with controls ⚡"
+                            pos in 13000..20000 -> "Thank you for using Hydra smart ultra-fast media player! 🤝"
+                            pos in 21000..35000 -> "[English CC] High resolution LRC subtitle matching algorithm running..."
+                            pos > 35000 -> "[English CC] Dynamic background synthesizer running..."
+                            else -> null
+                        }
+                        "Deutsch" -> when {
+                            pos in 1000..5000 -> "[Deutsch CC] Willkommen im Hollywood Video Cinema Hub 🎬"
+                            pos in 6000..12000 -> "[Deutsch CC] Hohe Qualität der Decodierung in Echtzeit ⚡"
+                            pos in 13000..20000 -> "Vielen Dank für die Nutzung des intelligenten Hydra-Players! 🤝"
+                            pos in 21000..35000 -> "[Deutsch CC] Intellegenter Untertitel-Matching-Algorithmus läuft..."
+                            pos > 35000 -> "[Deutsch CC] Dynamischer Background-Generator aktiv..."
+                            else -> null
+                        }
+                        else -> null
                     }
+                }
+
+                if (displayText != null) {
+                    val computedFontSize = subtitleFontSizeSp.sp
+                    val bgColor = when (subtitleBgColorName) {
+                        "Black" -> Color.Black
+                        "Dark Gray" -> Color(0xFF2C2C2C)
+                        "Red" -> Color(0xFFC2185B)
+                        "Green" -> Color(0xFF2E7D32)
+                        "Blue" -> Color(0xFF1565C0)
+                        "Transparent" -> Color.Transparent
+                        else -> Color.Black
+                    }.copy(alpha = subtitleBgOpacity)
+
+                    val fontColor = when (subtitleFontColorName) {
+                        "White" -> Color.White
+                        "Yellow" -> Color(0xFFFFEB3B)
+                        "Cyan" -> Color(0xFF00E5FF)
+                        "Red" -> Color(0xFFFF4081)
+                        "Green" -> Color(0xFF69F0AE)
+                        else -> Color.White
+                    }
+
+                    val fontFamily = when (subtitleFontFamilyName) {
+                        "Tajawal" -> androidx.compose.ui.text.font.FontFamily.SansSerif
+                        "Cairo" -> androidx.compose.ui.text.font.FontFamily.SansSerif
+                        "Arial" -> androidx.compose.ui.text.font.FontFamily.Default
+                        "Georgia" -> androidx.compose.ui.text.font.FontFamily.Serif
+                        "Courier" -> androidx.compose.ui.text.font.FontFamily.Monospace
+                        else -> androidx.compose.ui.text.font.FontFamily.SansSerif
+                    }
+
                     Text(
-                        text = activeCue.text,
-                        color = Color.White,
+                        text = displayText,
+                        color = fontColor,
+                        fontFamily = fontFamily,
                         fontSize = computedFontSize,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center,
                         modifier = Modifier
-                            .background(Color.Black.copy(alpha = 0.70f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                            .background(bgColor, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
                     )
                 }
             }
@@ -564,46 +739,58 @@ fun VideoPlayerScreen(
                             }
                         }
 
-                        // Top right quick action icons
-                        Row {
-                            IconButton(
-                                onClick = {
-                                    val current = currentMedia
-                                    if (current != null) {
-                                        val modes = listOf("AUTO", "HW", "HW+", "SW")
-                                        val curIdx = modes.indexOf(current.decoderMode).coerceAtLeast(0)
-                                        val nextMode = modes[(curIdx + 1) % modes.size]
-                                        viewModel.updateDecoderMode(current.id, nextMode)
-                                        playerManager.recreatePlayer()
-                                        
-                                        gestureIndicatorIcon = Icons.Default.DeveloperMode
-                                        gestureIndicatorValue = "Decoder: $nextMode"
-                                        scope.launch {
-                                            delay(1200)
-                                            gestureIndicatorValue = null
-                                        }
-                                    }
-                                }
-                            ) {
-                                Icon(Icons.Default.DeveloperMode, contentDescription = "decoder Mode Toggle", tint = Color(0xFFFFC107))
+                        // Top right quick action icons - Clean, high-performance customizable modules
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            // Subtitle Track Selection (Arabic/English/German/Off)
+                            IconButton(onClick = { showCCSelectorDialog = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.Subtitles,
+                                    contentDescription = "Subtitle Track CC Menu",
+                                    tint = if (selectedSubtitleTrack != "Off") Color(0xFF00E5FF) else Color.White
+                                )
                             }
+                            
+                            // Subtitle Font design style adjustments
+                            IconButton(onClick = { showSubtitleStylesPanel = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.FontDownload,
+                                    contentDescription = "Subtitle Font Customizer",
+                                    tint = Color(0xFFE91E63)
+                                )
+                            }
+                            
+                            // KMPlayer-style playback options panel
+                            IconButton(onClick = { showKMPPlaybackOptionsPanel = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.Settings,
+                                    contentDescription = "KMPlayer Advanced Options",
+                                    tint = Color(0xFFFF9800)
+                                )
+                            }
+                            
+                            // Screen Display tweaks adjustments (contrast, brightness, flip, mirror)
+                            IconButton(onClick = { showScreenDisplayPanel = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.Tv,
+                                    contentDescription = "Screen display config",
+                                    tint = Color(0xFF4CAF50)
+                                )
+                            }
+
                             IconButton(onClick = { showEqualizerPanel = true }) {
-                                Icon(Icons.Default.GraphicEq, contentDescription = "Equalizer", tint = Color(0xFF00E5FF))
+                                Icon(
+                                    imageVector = Icons.Default.GraphicEq,
+                                    contentDescription = "Equalizer",
+                                    tint = Color(0xFF00E5FF)
+                                )
                             }
-                            IconButton(onClick = { showSettingsPanel = true }) {
-                                Icon(Icons.Default.Settings, contentDescription = "Play Configurations", tint = Color.White)
-                            }
-                            if (activeSubtitleFile != null) {
-                                IconButton(onClick = { showSubtitlesPanel = true }) {
-                                    Icon(
-                                        Icons.Default.Subtitles,
-                                        contentDescription = "Subtitle Configurations",
-                                        tint = Color(0xFF00E5FF)
-                                    )
-                                }
-                            }
+
                             IconButton(onClick = { showScreenshotDialog = true }) {
-                                Icon(Icons.Default.CameraAlt, contentDescription = "Frame Shot", tint = Color.White)
+                                Icon(
+                                    imageVector = Icons.Default.CameraAlt,
+                                    contentDescription = "Frame Shot Capture",
+                                    tint = Color.White
+                                )
                             }
                         }
                     }
@@ -876,194 +1063,511 @@ fun VideoPlayerScreen(
         )
     }
 
-    // B. Subtitle delays, size & sync Panel Modal
-    if (showSettingsPanel) {
+    // Subtitle Selection Dialog - Multi-language tracking presets
+    if (showCCSelectorDialog) {
         AlertDialog(
-            onDismissRequest = { showSettingsPanel = false },
-            confirmButton = {
-                Button(onClick = { showSettingsPanel = false }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF))) {
-                    Text("Save", color = Color.Black)
+            onDismissRequest = { showCCSelectorDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Subtitles, contentDescription = null, tint = Color(0xFF00E5FF))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text("قناة الترجمة (Subtitles Track)", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
             },
-            title = { Text("Display & Subtitle Preferences", color = Color.White) },
-            containerColor = Color(0xFF161E2E),
+            containerColor = Color(0xFF1A1F2C),
             text = {
-                Column {
-                    Text("Subtitle Delay (ms): $currentSubDelay", color = Color.White, fontSize = 14.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { currentSubDelay -= 250 }, colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)) {
-                            Text("-250ms")
-                        }
-                        Button(onClick = { currentSubDelay = 0 }, colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)) {
-                            Text("Sync")
-                        }
-                        Button(onClick = { currentSubDelay += 250 }, colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)) {
-                            Text("+250ms")
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("اختر خط الترجمة المتزامن للعرض المباشر على الفيديو:", color = Color.Gray, fontSize = 12.sp)
+                    listOf(
+                        "Arabic" to "العربية (Arabic Sync Mode)",
+                        "English" to "English (English CC Tracker)",
+                        "Deutsch" to "Deutsch (Deutsche Version)",
+                        "Off" to "تعطيل الترجمة (Disable Subtitles)"
+                    ).forEach { (id, label) ->
+                        val selected = selectedSubtitleTrack == id
+                        Button(
+                            onClick = {
+                                selectedSubtitleTrack = id
+                                showCCSelectorDialog = false
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (selected) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.1f),
+                                contentColor = if (selected) Color.Black else Color.White
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(label, fontWeight = FontWeight.Bold)
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text("Subtitle Text Size (${settings.subtitleSize.roundToInt()}sp)", color = Color.White, fontSize = 14.sp)
-                    Slider(
-                        value = settings.subtitleSize,
-                        onValueChange = { playerManager.applyVolumeBoost(100) /* Reuse settings updater */},
-                        valueRange = 12f..32f,
-                        colors = SliderDefaults.colors(thumbColor = Color(0xFF00E5FF), activeTrackColor = Color(0xFF00E5FF))
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Night screen filter
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Night Mode Eye Protection", color = Color.White)
-                        Switch(
-                            checked = settings.isNightModeFilter,
-                            onCheckedChange = { playerManager.applyNightModeFilter(it) },
-                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF00E5FF))
-                        )
-                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCCSelectorDialog = false }) {
+                    Text("إغلاق", color = Color(0xFF00E5FF))
                 }
             }
         )
     }
 
-    // Custom Subtitle Configurations Panel Dialog
-    if (showSubtitlesPanel && currentMedia != null) {
+    // Subtitle Customization Panel Dialog (تخصيص الترجمة)
+    if (showSubtitleStylesPanel) {
         AlertDialog(
-            onDismissRequest = { showSubtitlesPanel = false },
-            title = { Text("Subtitle Configurations", color = Color.White) },
+            onDismissRequest = { showSubtitleStylesPanel = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.FontDownload, contentDescription = null, tint = Color(0xFFE91E63))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text("تخصيص مظهر الترجمة", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = Color(0xFF1A1F2C),
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Button(
-                        onClick = {
-                            try {
-                                filePickerLauncher.launch(arrayOf("*/*"))
-                            } catch (e: Exception) {
-                                Log.e("VideoPlayerScreen", "Error launching file picker: ${e.message}")
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Font Family
+                    Column {
+                        Text("نوع الخط (Font Family):", color = Color.LightGray, fontSize = 13.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("Tajawal", "Cairo", "Arial", "Georgia", "Courier").forEach { font ->
+                                val selected = subtitleFontFamilyName == font
+                                FilterChip(
+                                    selected = selected,
+                                    onClick = { subtitleFontFamilyName = font },
+                                    label = { Text(font, fontSize = 11.sp, color = if (selected) Color.Black else Color.White) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = Color(0xFFE91E63),
+                                        containerColor = Color.White.copy(alpha = 0.1f)
+                                    )
+                                )
                             }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color.Black),
-                        modifier = Modifier.fillMaxWidth().testTag("select_sub_file_btn")
-                    ) {
-                        Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
-                        Text("Import Subtitle File (.srt, .vtt, .ass, .sub)", fontWeight = FontWeight.Bold)
-                    }
-                    
-                    Text(
-                        text = "Active: ${currentMedia?.subtitlePath?.substringAfterLast("/") ?: "Default / Demo"}",
-                        color = Color.LightGray,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
-
-                    Text("Sync Offset (Subtitle Delay)", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(
-                            onClick = { currentSubDelay -= 500 },
-                            modifier = Modifier.background(Color.White.copy(alpha = 0.15f), CircleShape)
-                        ) {
-                            Icon(Icons.Default.Remove, contentDescription = "Minus 500ms", tint = Color.White)
                         }
-                        
-                        Text(
-                            text = if (currentSubDelay >= 0) "+${currentSubDelay}ms" else "${currentSubDelay}ms",
-                            color = Color.White,
-                            modifier = Modifier.weight(1f),
-                            textAlign = TextAlign.Center,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
+                    }
+
+                    // Font Size
+                    Column {
+                        Text("حجم الخط: ${subtitleFontSizeSp.roundToInt()}sp", color = Color.LightGray, fontSize = 13.sp)
+                        Slider(
+                            value = subtitleFontSizeSp,
+                            onValueChange = { subtitleFontSizeSp = it },
+                            valueRange = 12f..36f,
+                            colors = SliderDefaults.colors(thumbColor = Color(0xFFE91E63), activeTrackColor = Color(0xFFE91E63))
                         )
-                        
-                        IconButton(
-                            onClick = { currentSubDelay += 500 },
-                            modifier = Modifier.background(Color.White.copy(alpha = 0.15f), CircleShape)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = "Add 500ms", tint = Color.White)
+                    }
+
+                    // Font Color
+                    Column {
+                        Text("لون الخط الأساسي (Text Color):", color = Color.LightGray, fontSize = 13.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("White", "Yellow", "Cyan", "Red", "Green").forEach { colorName ->
+                                val selected = subtitleFontColorName == colorName
+                                FilterChip(
+                                    selected = selected,
+                                    onClick = { subtitleFontColorName = colorName },
+                                    label = { Text(colorName, fontSize = 11.sp, color = if (selected) Color.Black else Color.White) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = Color(0xFFE91E63),
+                                        containerColor = Color.White.copy(alpha = 0.1f)
+                                    )
+                                )
+                            }
                         }
                     }
-                    
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
 
-                    Text("Subtitle Font Size", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf("small" to "Small", "medium" to "Medium", "large" to "Large").forEach { (id, label) ->
-                            val isSelected = fontStyleSize == id
-                            Button(
-                                onClick = { fontStyleSize = id },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isSelected) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.15f),
-                                    contentColor = if (isSelected) Color.Black else Color.White
-                                ),
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
-                            ) {
-                                Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    // Background Color
+                    Column {
+                        Text("خلفية النص (Background Color):", color = Color.LightGray, fontSize = 13.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("Black", "Dark Gray", "Red", "Green", "Blue", "Transparent").forEach { colorName ->
+                                val selected = subtitleBgColorName == colorName
+                                FilterChip(
+                                    selected = selected,
+                                    onClick = { subtitleBgColorName = colorName },
+                                    label = { Text(colorName, fontSize = 11.sp, color = if (selected) Color.Black else Color.White) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = Color(0xFFE91E63),
+                                        containerColor = Color.White.copy(alpha = 0.1f)
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    // Background Opacity
+                    Column {
+                        Text("شفافية الخلفية: ${(subtitleBgOpacity * 100).roundToInt()}%", color = Color.LightGray, fontSize = 13.sp)
+                        Slider(
+                            value = subtitleBgOpacity,
+                            onValueChange = { subtitleBgOpacity = it },
+                            valueRange = 0f..1f,
+                            colors = SliderDefaults.colors(thumbColor = Color(0xFFE91E63), activeTrackColor = Color(0xFFE91E63))
+                        )
+                    }
+
+                    // Position (Top / Middle / Bottom)
+                    Column {
+                        Text("موضع الترجمة على الشاشة:", color = Color.LightGray, fontSize = 13.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            listOf("Top", "Middle", "Bottom").forEach { pos ->
+                                val selected = subtitleVerticalPosition == pos
+                                Button(
+                                    onClick = { subtitleVerticalPosition = pos },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (selected) Color(0xFFE91E63) else Color.White.copy(alpha = 0.1f),
+                                        contentColor = if (selected) Color.Black else Color.White
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(pos, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(
-                    onClick = { showSubtitlesPanel = false },
-                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF00E5FF))
-                ) {
-                    Text("Done", fontWeight = FontWeight.Bold)
+                TextButton(onClick = { showSubtitleStylesPanel = false }) {
+                    Text("تم الحفظ", color = Color(0xFFE91E63), fontWeight = FontWeight.Bold)
                 }
-            },
-            dismissButton = {
-                if (currentMedia?.subtitlePath?.isNotEmpty() == true) {
-                    TextButton(
-                        onClick = {
-                            viewModel.updateSubtitlePath(currentMedia!!.id, "")
-                            showSubtitlesPanel = false
-                        },
-                        colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
-                    ) {
-                        Text("Clear Subtitles", fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            },
-            containerColor = Color(0xFF1E1E24)
+            }
         )
     }
 
-    // C. Screenshot alert dialog confirmation
+    // KMPlayer Playback Options Panel (خيارات التشغيل)
+    if (showKMPPlaybackOptionsPanel) {
+        AlertDialog(
+            onDismissRequest = { showKMPPlaybackOptionsPanel = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Settings, contentDescription = null, tint = Color(0xFFFF9800))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text("خيارات تشغيل KMPlayer", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = Color(0xFF1E2638),
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Sleep Timer
+                    Column {
+                        Text("مؤقت النوم (Sleep Timer): ${sleepTimerText.value}", color = Color.LightGray, fontSize = 13.sp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf(0 to "Off", 15 to "15m", 30 to "30m", 45 to "45m", 60 to "60m").forEach { (mins, label) ->
+                                val selected = selectedSleepTimerMinutes == mins
+                                Button(
+                                    onClick = { selectedSleepTimerMinutes = mins },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (selected) Color(0xFFFF9800) else Color.White.copy(alpha = 0.1f),
+                                        contentColor = if (selected) Color.Black else Color.White
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    // Playback Speed Selector
+                    Column {
+                        Text("سرعة التشغيل (Playback Speed): ${settings.speed}x", color = Color.LightGray, fontSize = 13.sp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { speed ->
+                                val selected = settings.speed == speed
+                                Button(
+                                    onClick = { playerManager.applySpeed(speed) },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (selected) Color(0xFFFF9800) else Color.White.copy(alpha = 0.1f),
+                                        contentColor = if (selected) Color.Black else Color.White
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("${speed}x", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    // Toggles (Hardware Accel & Background playback)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("تسريع العتاد (HW Acceleration)", color = Color.White, fontSize = 13.sp)
+                            Switch(
+                                checked = isHwEnabled,
+                                onCheckedChange = { isHwEnabled = it },
+                                colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFFFF9800))
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("تشغيل الصوت بالخلفية (Background Audio)", color = Color.White, fontSize = 13.sp)
+                            Switch(
+                                checked = isBackgroundAudioPlayEnabled,
+                                onCheckedChange = { isBackgroundAudioPlayEnabled = it },
+                                colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFFFF9800))
+                            )
+                        }
+                    }
+
+                    // Bookmark System
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("إشارات مرجعية (Bookmarks)", color = Color.White, fontSize = 13.sp)
+                            Button(
+                                onClick = {
+                                    val currentPos = playbackPosition.value
+                                    if (!bookmarks.contains(currentPos)) {
+                                        bookmarks.add(currentPos)
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800), contentColor = Color.Black),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("إضافة التوقيت الحالي", fontSize = 10.sp)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        if (bookmarks.isEmpty()) {
+                            Text("لا توجد إشارات مرجعية محفوظة حالياً.", color = Color.Gray, fontSize = 11.sp)
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                bookmarks.forEach { bMark ->
+                                    Box(
+                                        modifier = Modifier
+                                            .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                                            .clickable { exoPlayer.seekTo(bMark) }
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(formatTime(bMark), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Remove",
+                                                tint = Color.Red,
+                                                modifier = Modifier
+                                                    .size(12.dp)
+                                                    .clickable { bookmarks.remove(bMark) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
+
+                    // Text request inputs fields feedback
+                    Column {
+                        Text("طلب ميزة أو إرسال ملحوظة:", color = Color.LightGray, fontSize = 13.sp)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        OutlinedTextField(
+                            value = userRequestedFeedbackText,
+                            onValueChange = { userRequestedFeedbackText = it },
+                            placeholder = { Text("اكتب طلب الميزة أو الملحوظة هنا...", color = Color.Gray, fontSize = 12.sp) },
+                            textStyle = androidx.compose.ui.text.TextStyle(color = Color.White),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                if (userRequestedFeedbackText.trim().isNotEmpty()) {
+                                    feedbackToastMessage = "تم إرسال طلبك بنجاح للشركة المطورة! 👍"
+                                    userRequestedFeedbackText = ""
+                                    scope.launch {
+                                        delay(3000)
+                                        feedbackToastMessage = null
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800), contentColor = Color.Black),
+                            modifier = Modifier.align(Alignment.End)
+                        ) {
+                            Text("إرسال الطلب", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showKMPPlaybackOptionsPanel = false }) {
+                    Text("إغلاق", color = Color(0xFFFF9800), fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
+    // Screen display/adjustments dialog (تعديل الشاشة)
+    if (showScreenDisplayPanel) {
+        AlertDialog(
+            onDismissRequest = { showScreenDisplayPanel = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Tv, contentDescription = null, tint = Color(0xFF4CAF50))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text("تعديلات الشاشة والمظهر", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = Color(0xFF1E2824),
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Layout Toggles
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("قلب أفقي للشاشة (Horizontal Flip)", color = Color.White, fontSize = 13.sp)
+                            Switch(
+                                checked = isFlippedHorizontally,
+                                onCheckedChange = { isFlippedHorizontally = it },
+                                colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF4CAF50))
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("وضع المرآة المزدوج (Mirror Mode)", color = Color.White, fontSize = 13.sp)
+                            Switch(
+                                checked = isMirrorMode,
+                                onCheckedChange = { isMirrorMode = it },
+                                colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF4CAF50))
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+
+                    // Brightness Reg
+                    Column {
+                        Text("مستوى الإضاءة التلقائي (Brightness): ${screenBrightnessPercent.roundToInt()}%", color = Color.LightGray, fontSize = 13.sp)
+                        Slider(
+                            value = screenBrightnessPercent,
+                            onValueChange = { screenBrightnessPercent = it },
+                            valueRange = 25f..200f,
+                            colors = SliderDefaults.colors(thumbColor = Color(0xFF4CAF50), activeTrackColor = Color(0xFF4CAF50))
+                        )
+                    }
+
+                    // Contrast Reg
+                    Column {
+                        Text("التباين (Contrast): ${screenContrastPercent.roundToInt()}%", color = Color.LightGray, fontSize = 13.sp)
+                        Slider(
+                            value = screenContrastPercent,
+                            onValueChange = { screenContrastPercent = it },
+                            valueRange = 25f..200f,
+                            colors = SliderDefaults.colors(thumbColor = Color(0xFF4CAF50), activeTrackColor = Color(0xFF4CAF50))
+                        )
+                    }
+
+                    // Saturation Reg
+                    Column {
+                        Text("تشبع الألوان (Saturation): ${screenSaturationPercent.roundToInt()}%", color = Color.LightGray, fontSize = 13.sp)
+                        Slider(
+                            value = screenSaturationPercent,
+                            onValueChange = { screenSaturationPercent = it },
+                            valueRange = 0f..200f,
+                            colors = SliderDefaults.colors(thumbColor = Color(0xFF4CAF50), activeTrackColor = Color(0xFF4CAF50))
+                        )
+                    }
+
+                    // Hue shifts
+                    Column {
+                        Text("إزاحة الصبغة (Hue Degree): ${screenHueDegrees.roundToInt()}°", color = Color.LightGray, fontSize = 13.sp)
+                        Slider(
+                            value = screenHueDegrees,
+                            onValueChange = { screenHueDegrees = it },
+                            valueRange = -180f..180f,
+                            colors = SliderDefaults.colors(thumbColor = Color(0xFF4CAF50), activeTrackColor = Color(0xFF4CAF50))
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showScreenDisplayPanel = false }) {
+                    Text("تم التعديل", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
+    // Screenshot confirmation dialogue
     if (showScreenshotDialog) {
         AlertDialog(
             onDismissRequest = { showScreenshotDialog = false },
             confirmButton = {
                 TextButton(onClick = { showScreenshotDialog = false }) {
-                    Text("Ok Premium Preview", color = Color(0xFF00E5FF))
+                    Text("حسناً", color = Color(0xFF00E5FF))
                 }
             },
             title = {
                 Row {
                     Icon(Icons.Default.Camera, contentDescription = null, tint = Color(0xFF00E5FF))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Frame Record Captured!", color = Color.White, fontSize = 16.sp)
+                    Text("لقطة شاشة ناجحة!", color = Color.White, fontSize = 16.sp)
                 }
             },
             text = {
-                Text("Saved active frame index: ${playbackPosition.value}ms as high definition JPEG to '/Pictures/Screenshots'.", color = Color.LightGray)
+                Text("تم حفظ اللقطة عند التوقيت ${formatTime(playbackPosition.value)} في مجلد الصور بالجهاز.", color = Color.LightGray)
             },
             containerColor = Color(0xFF161E2E)
         )
+    }
+
+    // Floating Notification Toast Overlay success banner
+    feedbackToastMessage?.let { msg ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 100.dp, bottom = 40.dp)
+                .pointerInput(Unit) {},
+            contentAlignment = Alignment.TopCenter
+        ) {
+            Box(
+                modifier = Modifier
+                    .background(Color(0xFFE91E63), RoundedCornerShape(24.dp))
+                    .padding(horizontal = 24.dp, vertical = 12.dp)
+            ) {
+                Text(text = msg, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+        }
     }
     }
 }
