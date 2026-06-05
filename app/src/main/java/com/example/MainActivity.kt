@@ -41,6 +41,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.MediaViewModel
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 
 class MainActivity : ComponentActivity() {
 
@@ -108,9 +112,19 @@ class MainActivity : ComponentActivity() {
                 val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
                 val isPipMode by viewModel.isInPipMode.collectAsStateWithLifecycle()
 
+                val navController = rememberNavController()
+
                 LaunchedEffect(isPlaying, isPipMode) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isPipMode) {
                         updatePiPParams(isPlaying)
+                    }
+                }
+
+                LaunchedEffect(currentMedia) {
+                    if (currentMedia != null) {
+                        navController.navigate("player") {
+                            launchSingleTop = true
+                        }
                     }
                 }
                 
@@ -118,21 +132,32 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    if (currentMedia != null) {
-                        // Full Screen Overlay Video Player is active!
-                        VideoPlayerScreen(
-                            viewModel = viewModel,
-                            onBack = {
-                                viewModel.playerManager.stopAndSaveProgress { progress, duration ->
-                                    viewModel.saveHistoryProgress(currentMedia!!.id, progress, duration)
+                    NavHost(
+                        navController = navController,
+                        startDestination = "main"
+                    ) {
+                        composable("main") {
+                            MainTabbedShell(viewModel = viewModel)
+                        }
+                        composable("player") {
+                            if (currentMedia != null) {
+                                VideoPlayerScreen(
+                                    viewModel = viewModel,
+                                    onBack = {
+                                        viewModel.playerManager.stopAndSaveProgress { progress, duration ->
+                                            viewModel.saveHistoryProgress(currentMedia!!.id, progress, duration)
+                                        }
+                                        viewModel.playerManager.release()
+                                        viewModel.playerManager.setCurrentMedia(null)
+                                        navController.popBackStack("main", false)
+                                    }
+                                )
+                            } else {
+                                LaunchedEffect(Unit) {
+                                    navController.popBackStack("main", false)
                                 }
-                                viewModel.playerManager.release()
-                                viewModel.playerManager.setCurrentMedia(null)
                             }
-                        )
-                    } else {
-                        // Regular tabbed shell navigator layout
-                        MainTabbedShell(viewModel = viewModel)
+                        }
                     }
                 }
             }
@@ -294,7 +319,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainTabbedShell(viewModel: MediaViewModel) {
-    var selectedScreen by remember { mutableStateOf("videos") }
+    var selectedScreen by rememberSaveable { mutableStateOf("videos") }
 
     Scaffold(
         bottomBar = {
@@ -316,13 +341,6 @@ fun MainTabbedShell(viewModel: MediaViewModel) {
                     modifier = Modifier.testTag("nav_item_music")
                 )
                 NavigationBarItem(
-                    selected = selectedScreen == "streams",
-                    onClick = { selectedScreen = "streams" },
-                    icon = { Icon(Icons.Default.Wifi, contentDescription = "Network & Streams") },
-                    label = { Text("Streams") },
-                    modifier = Modifier.testTag("nav_item_streams")
-                )
-                NavigationBarItem(
                     selected = selectedScreen == "me",
                     onClick = { selectedScreen = "me" },
                     icon = { Icon(Icons.Default.Person, contentDescription = "Stats, Settings and secure Vault") },
@@ -341,11 +359,6 @@ fun MainTabbedShell(viewModel: MediaViewModel) {
             )
             "music" -> MusicScreen(
                 viewModel = viewModel,
-                modifier = Modifier.padding(innerPadding)
-            )
-            "streams" -> StreamingScreen(
-                viewModel = viewModel,
-                onSelectMedia = { viewModel.selectMedia(it) },
                 modifier = Modifier.padding(innerPadding)
             )
             "me" -> MeScreen(

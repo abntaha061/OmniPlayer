@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import java.io.File
+import android.os.Environment
+
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -353,6 +356,95 @@ fun MusicScreen(
 
 data class LyricLine(val timeMs: Long, val text: String)
 
+fun findLrcFile(audioPath: String): File? {
+    try {
+        val audioFile = File(audioPath)
+        val baseName = audioFile.nameWithoutExtension
+        val parentDir = audioFile.parentFile
+        if (parentDir != null) {
+            val sameFolderFile = File(parentDir, "$baseName.lrc")
+            if (sameFolderFile.exists() && sameFolderFile.isFile) {
+                return sameFolderFile
+            }
+            val sameFolderFileUpper = File(parentDir, "$baseName.LRC")
+            if (sameFolderFileUpper.exists() && sameFolderFileUpper.isFile) {
+                return sameFolderFileUpper
+            }
+        }
+        
+        val lyricDirs = listOf(
+            File("/storage/emulated/0/Music/Lyrics"),
+            File("/sdcard/Music/Lyrics"),
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Lyrics")
+        )
+        for (dir in lyricDirs) {
+            if (dir.exists() && dir.isDirectory) {
+                val lyricsFile = File(dir, "$baseName.lrc")
+                if (lyricsFile.exists() && lyricsFile.isFile) {
+                    return lyricsFile
+                }
+                val lyricsFileUpper = File(dir, "$baseName.LRC")
+                if (lyricsFileUpper.exists() && lyricsFileUpper.isFile) {
+                    return lyricsFileUpper
+                }
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+    return null
+}
+
+fun parseLrcTime(timeStr: String): Long? {
+    try {
+        val parts = timeStr.trim().split(":")
+        if (parts.size != 2) return null
+        val minutes = parts[0].toLong()
+        val secondsParts = parts[1].split(".")
+        val seconds = secondsParts[0].toLong()
+        val milliseconds = if (secondsParts.size > 1) {
+            val msStr = secondsParts[1]
+            if (msStr.length == 2) {
+                msStr.toLong() * 10
+            } else if (msStr.length >= 3) {
+                msStr.take(3).toLong()
+            } else if (msStr.length == 1) {
+                msStr.toLong() * 100
+            } else {
+                0L
+            }
+        } else {
+            0L
+        }
+        return (minutes * 60 + seconds) * 1000 + milliseconds
+    } catch (e: Exception) {
+        return null
+    }
+}
+
+fun parseLrcFile(file: File): List<LyricLine> {
+    val lyrics = mutableListOf<LyricLine>()
+    val timeRegex = Regex("\\[(\\d+:\\d+\\.\\d+)\\]")
+    try {
+        file.forEachLine { line ->
+            val matchResults = timeRegex.findAll(line).toList()
+            if (matchResults.isNotEmpty()) {
+                val cleanText = line.replace(timeRegex, "").trim()
+                for (match in matchResults) {
+                    val timeStr = match.groupValues[1]
+                    val timeMs = parseLrcTime(timeStr)
+                    if (timeMs != null) {
+                        lyrics.add(LyricLine(timeMs, cleanText))
+                    }
+                }
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+    return lyrics.sortedBy { it.timeMs }
+}
+
 fun generateLyrics(songName: String, durationMs: Long): List<LyricLine> {
     val lines = listOf(
         "♫ Welcome to Aura Audio Player ♫",
@@ -405,9 +497,18 @@ fun ActiveMusicPlayerCard(
         }
     }
 
-    // Lyrics caching
-    val trackLyrics = remember(track.id, duration) {
-        generateLyrics(track.displayName, duration)
+    // Dynamic LRC search & parse logic
+    var trackLyrics by remember(track.id) { mutableStateOf<List<LyricLine>?>(null) }
+
+    LaunchedEffect(track.path) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val file = findLrcFile(track.path)
+            trackLyrics = if (file != null) {
+                parseLrcFile(file)
+            } else {
+                emptyList()
+            }
+        }
     }
 
     // Floating Vinyl Disc Animation rotating
@@ -550,44 +651,72 @@ fun ActiveMusicPlayerCard(
                             modifier = Modifier.padding(bottom = 6.dp)
                         )
 
-                        val activeLyricIndex = trackLyrics.indexOfLast { currentPositionMs >= it.timeMs }.coerceAtLeast(0)
-                        val lazyListState = rememberLazyListState()
+                        val lyricsList = trackLyrics
+                        if (lyricsList == null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(140.dp)
+                                    .border(1.dp, Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                                    .background(Color.Black.copy(alpha = 0.20f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(color = Color(0xFF00E5FF), modifier = Modifier.size(24.dp))
+                            }
+                        } else if (lyricsList.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(140.dp)
+                                    .border(1.dp, Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                                    .background(Color.Black.copy(alpha = 0.20f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "No lyrics found",
+                                    fontSize = 14.sp,
+                                    color = Color.Gray,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        } else {
+                            val activeLyricIndex = lyricsList.indexOfLast { currentPositionMs >= it.timeMs }.coerceAtLeast(0)
+                            val lazyListState = rememberLazyListState()
 
-                        // Auto-scroll to current active lyric index
-                        LaunchedEffect(activeLyricIndex) {
-                            if (trackLyrics.isNotEmpty()) {
+                            // Auto-scroll to current active lyric index
+                            LaunchedEffect(activeLyricIndex) {
                                 lazyListState.animateScrollToItem(activeLyricIndex)
                             }
-                        }
 
-                        LazyColumn(
-                            state = lazyListState,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(140.dp)
-                                .border(1.dp, Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-                                .background(Color.Black.copy(alpha = 0.20f))
-                                .padding(vertical = 4.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            itemsIndexed(trackLyrics) { index, line ->
-                                val isActive = index == activeLyricIndex
-                                val scale by animateFloatAsState(if (isActive) 1.15f else 0.95f, label = "lyricScale")
-                                val textAlpha by animateFloatAsState(if (isActive) 1.0f else 0.40f, label = "lyricAlpha")
-                                
-                                Text(
-                                    text = line.text,
-                                    fontSize = 14.sp,
-                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isActive) Color(0xFF00E5FF) else Color.White,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 14.dp)
-                                        .graphicsLayer(scaleX = scale, scaleY = scale)
-                                        .alpha(textAlpha)
-                                )
+                            LazyColumn(
+                                state = lazyListState,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(140.dp)
+                                    .border(1.dp, Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                                    .background(Color.Black.copy(alpha = 0.20f))
+                                    .padding(vertical = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                itemsIndexed(lyricsList) { index, line ->
+                                    val isActive = index == activeLyricIndex
+                                    val scale by animateFloatAsState(if (isActive) 1.15f else 0.95f, label = "lyricScale")
+                                    val textAlpha by animateFloatAsState(if (isActive) 1.0f else 0.40f, label = "lyricAlpha")
+                                    
+                                    Text(
+                                        text = line.text,
+                                        fontSize = 14.sp,
+                                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isActive) Color(0xFF00E5FF) else Color.White,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 14.dp)
+                                            .graphicsLayer(scaleX = scale, scaleY = scale)
+                                            .alpha(textAlpha)
+                                    )
+                                }
                             }
                         }
                     }

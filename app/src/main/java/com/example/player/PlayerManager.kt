@@ -197,6 +197,7 @@ class PlayerManager(private val context: Context) {
                 }
                 val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(subtitleUri)
                     .setMimeType(mimeType)
+                    .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
                     .setLanguage("en")
                     .build()
                 builder.setSubtitleConfigurations(listOf(subtitleConfig))
@@ -205,16 +206,35 @@ class PlayerManager(private val context: Context) {
         } else {
             val localFile = File(media.path)
             val builder = MediaItem.Builder().setUri(Uri.fromFile(localFile))
-            if (media.subtitlePath.isNotEmpty()) {
-                val subtitleFile = File(media.subtitlePath)
+            
+            // Auto detect companion subtitle file if not manually specified
+            var activeSubtitlePath = media.subtitlePath
+            if (activeSubtitlePath.isEmpty()) {
+                val parentDir = localFile.parentFile
+                if (parentDir != null && parentDir.exists()) {
+                    val baseName = localFile.nameWithoutExtension
+                    val candidateExtensions = listOf(".srt", ".ass", ".vtt", ".sub", ".SRT", ".ASS", ".VTT", ".SUB")
+                    for (ext in candidateExtensions) {
+                        val candidateFile = File(parentDir, "$baseName$ext")
+                        if (candidateFile.exists() && candidateFile.isFile) {
+                            activeSubtitlePath = candidateFile.absolutePath
+                            break
+                        }
+                    }
+                }
+            }
+
+            if (activeSubtitlePath.isNotEmpty()) {
+                val subtitleFile = File(activeSubtitlePath)
                 val mimeType = when {
-                    media.subtitlePath.endsWith(".vtt", ignoreCase = true) -> MimeTypes.TEXT_VTT
-                    media.subtitlePath.endsWith(".ass", ignoreCase = true) -> MimeTypes.TEXT_SSA
-                    media.subtitlePath.endsWith(".ssa", ignoreCase = true) -> MimeTypes.TEXT_SSA
+                    activeSubtitlePath.endsWith(".vtt", ignoreCase = true) -> MimeTypes.TEXT_VTT
+                    activeSubtitlePath.endsWith(".ass", ignoreCase = true) -> MimeTypes.TEXT_SSA
+                    activeSubtitlePath.endsWith(".ssa", ignoreCase = true) -> MimeTypes.TEXT_SSA
                     else -> MimeTypes.APPLICATION_SUBRIP
                 }
                 val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(subtitleFile))
                     .setMimeType(mimeType)
+                    .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
                     .setLanguage("en")
                     .build()
                 builder.setSubtitleConfigurations(listOf(subtitleConfig))

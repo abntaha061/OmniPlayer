@@ -54,13 +54,3 @@ data class WatchHistory(
     val duration: Long,
     val completed: Boolean = false
 )
-
-@Entity(tableName = "network_streams")
-data class NetworkStream(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val title: String,
-    val url: String,
-    val type: String = "HLS", // HLS, DASH, Direct, RTSP
-    val dateAdded: Long = System.currentTimeMillis(),
-    val isFavorite: Boolean = false
-)

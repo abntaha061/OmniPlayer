@@ -31,6 +31,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import coil.ImageLoader
+import coil.decode.VideoFrameDecoder
+import coil.request.ImageRequest
+import androidx.compose.ui.platform.LocalContext
 import com.example.domain.MediaFile
 import com.example.ui.MediaViewModel
 
@@ -610,6 +614,16 @@ fun VideoListItem(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
+    val context = LocalContext.current
+    val videoImageLoader = remember(context) {
+        ImageLoader.Builder(context)
+            .components {
+                add(VideoFrameDecoder.Factory())
+            }
+            .crossfade(true)
+            .build()
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -627,8 +641,17 @@ fun VideoListItem(
                 .background(Color.DarkGray)
         ) {
             if (media.thumbnailUri.isNotEmpty()) {
+                val imageRequest = remember(media.thumbnailUri, context) {
+                    ImageRequest.Builder(context)
+                        .data(android.net.Uri.parse(media.thumbnailUri))
+                        .crossfade(true)
+                        .diskCacheKey(media.thumbnailUri)
+                        .memoryCacheKey(media.thumbnailUri)
+                        .build()
+                }
                 AsyncImage(
-                    model = media.thumbnailUri,
+                    model = imageRequest,
+                    imageLoader = videoImageLoader,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
@@ -743,6 +766,16 @@ fun VideoGridItem(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
+    val context = LocalContext.current
+    val videoImageLoader = remember(context) {
+        ImageLoader.Builder(context)
+            .components {
+                add(VideoFrameDecoder.Factory())
+            }
+            .crossfade(true)
+            .build()
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -759,8 +792,17 @@ fun VideoGridItem(
                     .background(Color.DarkGray)
             ) {
                 if (media.thumbnailUri.isNotEmpty()) {
+                    val imageRequest = remember(media.thumbnailUri, context) {
+                        ImageRequest.Builder(context)
+                            .data(android.net.Uri.parse(media.thumbnailUri))
+                            .crossfade(true)
+                            .diskCacheKey(media.thumbnailUri)
+                            .memoryCacheKey(media.thumbnailUri)
+                            .build()
+                    }
                     AsyncImage(
-                        model = media.thumbnailUri,
+                        model = imageRequest,
+                        imageLoader = videoImageLoader,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()

@@ -83,16 +83,6 @@ interface MediaDao {
 
     @Query("DELETE FROM watch_history")
     suspend fun clearHistory()
-
-    // Network Streams
-    @Query("SELECT * FROM network_streams ORDER BY dateAdded DESC")
-    fun getAllStreams(): Flow<List<NetworkStream>>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertStream(stream: NetworkStream): Long
-
-    @Query("DELETE FROM network_streams WHERE id = :id")
-    suspend fun deleteStream(id: Long)
 }
 
 // Helper POJO for Watch History joins

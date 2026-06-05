@@ -49,6 +49,11 @@ import android.net.Uri
 import android.content.Intent
 import com.example.MainActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
+import android.content.pm.ActivityInfo
+import androidx.activity.compose.BackHandler
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.Dispatchers
 import java.io.File
@@ -177,11 +182,36 @@ fun VideoPlayerScreen(
         }
     }
 
-    // Set full-screen flag on device window safely
+    // Capture system back press so we return to the correct tab safely
+    BackHandler {
+        onBack()
+    }
+
+    // Set full-screen landscape on open & immersive sticky mode
+    val originalOrientation = remember { activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
+
     DisposableEffect(Unit) {
-        activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        // Enforce landscape orientation immediately
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        
+        // Hide status and navigation bars using WindowInsetsController immersive sticky mode
+        val window = activity?.window
+        if (window != null) {
+            val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+            insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            insetsController.hide(WindowInsetsCompat.Type.systemBars())
+        }
+        
         onDispose {
-            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            // Restore original orientation on exit
+            activity?.requestedOrientation = originalOrientation
+            
+            // Restore status and navigation bars on exit
+            if (window != null) {
+                val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+                insetsController.show(WindowInsetsCompat.Type.systemBars())
+            }
+            
             // Save state progress locally
             currentMedia?.let { media ->
                 val progress = exoPlayer.currentPosition

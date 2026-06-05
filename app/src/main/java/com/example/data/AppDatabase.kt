@@ -11,10 +11,9 @@ import com.example.domain.*
         MediaFile::class,
         Playlist::class,
         PlaylistItem::class,
-        WatchHistory::class,
-        NetworkStream::class
+        WatchHistory::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

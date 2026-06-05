@@ -14,7 +14,6 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.AppDatabase
 import com.example.data.MediaRepository
 import com.example.domain.MediaFile
-import com.example.domain.NetworkStream
 import com.example.domain.Playlist
 import com.example.player.PlayerManager
 import kotlinx.coroutines.flow.*
@@ -42,9 +41,6 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val watchHistory = repository.watchHistory
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val networkStreams: StateFlow<List<NetworkStream>> = repository.networkStreams
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Currently playing media
@@ -245,25 +241,6 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
 
     fun getPlaylistMedia(playlistId: Long): Flow<List<MediaFile>> {
         return repository.getPlaylistMedia(playlistId)
-    }
-
-    // Stream inputs
-    fun addNetworkStream(title: String, url: String) {
-        viewModelScope.launch {
-            repository.insertStream(
-                NetworkStream(
-                    title = title,
-                    url = url,
-                    type = if (url.contains(".m3u8")) "HLS" else if (url.contains(".mpd")) "DASH" else "Direct Link"
-                )
-            )
-        }
-    }
-
-    fun deleteNetworkStream(id: Long) {
-        viewModelScope.launch {
-            repository.deleteStream(id)
-        }
     }
 
     // Sleep Timer Functions
