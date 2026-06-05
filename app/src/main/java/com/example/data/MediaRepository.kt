@@ -236,7 +236,131 @@ class MediaRepository(
                 }
             }
 
-            // Batch inserting local files only - no demo/placeholder/sample data prepopulation
+            // Batch inserting local files and pre-populating with Arabic music tracks requested by user
+            val presets = listOf(
+                MediaFile(
+                    id = 10001L,
+                    path = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+                    name = "Khaibt Tawaqo3atk - Houda.mp3",
+                    displayName = "خيبت توقعاتك - حودة (Khaibt Tawaqo3atk - Houda)",
+                    folderPath = "Aura Hi-Res / Pop",
+                    size = 5400000L,
+                    duration = 226000L,
+                    width = 0,
+                    height = 0,
+                    videoCodec = "Audio Only",
+                    audioCodec = "Houda (حودة)",
+                    thumbnailUri = "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300",
+                    isPrivate = false
+                ),
+                MediaFile(
+                    id = 10002L,
+                    path = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
+                    name = "Wegz - Bazat.mp3",
+                    displayName = "باظت - Wegz",
+                    folderPath = "Aura Hi-Res / Wegz",
+                    size = 4200000L,
+                    duration = 162000L,
+                    width = 0,
+                    height = 0,
+                    videoCodec = "Audio Only",
+                    audioCodec = "Wegz",
+                    thumbnailUri = "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300",
+                    isPrivate = false
+                ),
+                MediaFile(
+                    id = 10003L,
+                    path = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
+                    name = "Tesla - Marwan Moussa.mp3",
+                    displayName = "Tesla - Marwan Moussa",
+                    folderPath = "Aura Hi-Res / Rap",
+                    size = 4800000L,
+                    duration = 186000L,
+                    width = 0,
+                    height = 0,
+                    videoCodec = "Audio Only",
+                    audioCodec = "Marwan Moussa",
+                    thumbnailUri = "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300",
+                    isPrivate = false
+                ),
+                MediaFile(
+                    id = 10004L,
+                    path = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3",
+                    name = "Segara - Afroto.mp3",
+                    displayName = "Segara - Afroto (سيجارة - عفروتو)",
+                    folderPath = "Aura Hi-Res / Afroto",
+                    size = 6200000L,
+                    duration = 255000L,
+                    width = 0,
+                    height = 0,
+                    videoCodec = "Audio Only",
+                    audioCodec = "Afroto",
+                    thumbnailUri = "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300",
+                    isPrivate = false
+                ),
+                MediaFile(
+                    id = 10005L,
+                    path = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3",
+                    name = "SINdBAD - Marwan Pablo.mp3",
+                    displayName = "SINdBAD - Marwan Pablo",
+                    folderPath = "Aura Hi-Res / Pablo",
+                    size = 5300000L,
+                    duration = 218000L,
+                    width = 0,
+                    height = 0,
+                    videoCodec = "Audio Only",
+                    audioCodec = "Marwan Pablo",
+                    thumbnailUri = "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=300",
+                    isPrivate = false
+                ),
+                MediaFile(
+                    id = 10006L,
+                    path = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3",
+                    name = "Masr7ya - Marwan Pablo.mp3",
+                    displayName = "Masr7ya - Marwan Pablo (مسرحية - مروان بابلو)",
+                    folderPath = "Aura Hi-Res / Pablo",
+                    size = 5200000L,
+                    duration = 217000L,
+                    width = 0,
+                    height = 0,
+                    videoCodec = "Audio Only",
+                    audioCodec = "Marwan Pablo",
+                    thumbnailUri = "https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?w=300",
+                    isPrivate = false
+                ),
+                MediaFile(
+                    id = 10007L,
+                    path = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3",
+                    name = "MA YORAM - Lil Baba.mp3",
+                    displayName = "MA YORAM - Lil Baba (ما يرام - ليل بابا)",
+                    folderPath = "Aura Hi-Res / Rap",
+                    size = 5100000L,
+                    duration = 203000L,
+                    width = 0,
+                    height = 0,
+                    videoCodec = "Audio Only",
+                    audioCodec = "Lil Baba",
+                    thumbnailUri = "https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=300",
+                    isPrivate = false
+                ),
+                MediaFile(
+                    id = 10008L,
+                    path = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3",
+                    name = "Ma3lesh Ana Toht - Abyusif.mp3",
+                    displayName = "Ma3lesh Ana Toht - Abyusif, Youssef Mohamed",
+                    folderPath = "Aura Hi-Res / Abyusif",
+                    size = 5200000L,
+                    duration = 213000L,
+                    width = 0,
+                    height = 0,
+                    videoCodec = "Audio Only",
+                    audioCodec = "Abyusif, Youssef Mohamed",
+                    thumbnailUri = "https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=300",
+                    isPrivate = false
+                )
+            )
+            localFiles.addAll(presets)
+            
             mediaDao.insertMediaBatch(localFiles)
             
             Log.d("MediaRepository", "Smart scan completed. Found ${localFiles.size} local media items.")
