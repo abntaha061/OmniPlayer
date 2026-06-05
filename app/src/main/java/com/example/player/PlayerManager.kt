@@ -18,6 +18,7 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import com.example.domain.MediaFile
+import com.example.utils.SubtitleParser
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -210,17 +211,9 @@ class PlayerManager(private val context: Context) {
             // Auto detect companion subtitle file if not manually specified
             var activeSubtitlePath = media.subtitlePath
             if (activeSubtitlePath.isEmpty()) {
-                val parentDir = localFile.parentFile
-                if (parentDir != null && parentDir.exists()) {
-                    val baseName = localFile.nameWithoutExtension
-                    val candidateExtensions = listOf(".srt", ".ass", ".vtt", ".sub", ".SRT", ".ASS", ".VTT", ".SUB")
-                    for (ext in candidateExtensions) {
-                        val candidateFile = File(parentDir, "$baseName$ext")
-                        if (candidateFile.exists() && candidateFile.isFile) {
-                            activeSubtitlePath = candidateFile.absolutePath
-                            break
-                        }
-                    }
+                val foundFile = SubtitleParser.findSubtitleFile(media.path)
+                if (foundFile != null) {
+                    activeSubtitlePath = foundFile.absolutePath
                 }
             }
 

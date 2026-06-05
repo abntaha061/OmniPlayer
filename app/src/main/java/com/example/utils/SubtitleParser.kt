@@ -1,6 +1,7 @@
 package com.example.utils
 
 import android.util.Log
+import java.io.File
 
 data class SubtitleCue(
     val startMs: Long,
@@ -118,14 +119,41 @@ object SubtitleParser {
 
     // Returns standard default subtitle tracks for demo videos based on playback progress
     fun getDemoCuesForTime(mediaId: Long): List<SubtitleCue> {
-        return listOf(
-            SubtitleCue(1000, 5000, "[Aura Media Player] Welcome to Aura Video Player Pro!"),
-            SubtitleCue(6000, 11000, "[Spectacular Cinematics] Testing high-fidelity H265 rendering..."),
-            SubtitleCue(12000, 16000, "[Full Gestures] Slide vertically on left to control brightness."),
-            SubtitleCue(17000, 21000, "[Acoustic Pro] Slide on the right column to control volume boost up to 200%!"),
-            SubtitleCue(22000, 27000, "Double Tap on either side to seek 10s backward or forward."),
-            SubtitleCue(28000, 34000, "Equalizer enables pristine audio enhancements with virtual surround bounds."),
-            SubtitleCue(35000, 1200000, "Enjoy your premium media experience. Built with Jetpack Compose & Media3.")
-        )
+        return emptyList()
+    }
+
+    // Auto-detect subtitle file by matching video filename in same folder (case insensitive, language codes supported)
+    fun findSubtitleFile(videoPath: String?): File? {
+        if (videoPath == null) return null
+        try {
+            val videoFile = File(videoPath)
+            val parentDir = videoFile.parentFile
+            if (parentDir != null && parentDir.exists() && parentDir.isDirectory) {
+                val videoBaseName = videoFile.nameWithoutExtension.lowercase()
+                val files = parentDir.listFiles() ?: return null
+                val allowedExtensions = listOf("srt", "vtt", "ass", "sub")
+                
+                for (file in files) {
+                    if (file.isFile) {
+                        val ext = file.extension.lowercase()
+                        if (allowedExtensions.contains(ext)) {
+                            val fileBaseName = file.nameWithoutExtension.lowercase()
+                            if (fileBaseName == videoBaseName) {
+                                return file
+                            }
+                            if (fileBaseName.startsWith("$videoBaseName.")) {
+                                val suffix = fileBaseName.substringAfter("$videoBaseName.")
+                                if (suffix.length in 2..3) {
+                                    return file
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("SubtitleParser", "Error auto-detecting subtitles: ${e.message}")
+        }
+        return null
     }
 }

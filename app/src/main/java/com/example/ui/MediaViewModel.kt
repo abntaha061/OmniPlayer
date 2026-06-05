@@ -46,6 +46,7 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
     // Currently playing media
     val currentMedia = playerManager.currentMedia
     val isPlaying = playerManager.isPlaying
+    val activeTab = MutableStateFlow("videos")
 
     private val _isInPipMode = MutableStateFlow(false)
     val isInPipMode: StateFlow<Boolean> = _isInPipMode.asStateFlow()

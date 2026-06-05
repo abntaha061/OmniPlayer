@@ -135,11 +135,21 @@ fun VideoPlayerScreen(
         }
     )
 
-    val loadedSubtitleCues = remember(currentMedia?.subtitlePath) {
-        val path = currentMedia?.subtitlePath ?: ""
-        if (path.isNotEmpty() && File(path).exists()) {
+    val activeSubtitleFile = remember(currentMedia) {
+        val media = currentMedia ?: return@remember null
+        if (media.subtitlePath.isNotEmpty()) {
+            val f = File(media.subtitlePath)
+            if (f.exists() && f.isFile) f else null
+        } else {
+            SubtitleParser.findSubtitleFile(media.path)
+        }
+    }
+
+    val loadedSubtitleCues = remember(activeSubtitleFile) {
+        val file = activeSubtitleFile
+        if (file != null && file.exists()) {
             try {
-                val content = File(path).readText()
+                val content = file.readText()
                 SubtitleParser.parse(content)
             } catch (e: Exception) {
                 emptyList()
@@ -187,13 +197,48 @@ fun VideoPlayerScreen(
         onBack()
     }
 
-    // Set full-screen landscape on open & immersive sticky mode
-    val originalOrientation = remember { activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
+    // Set full-screen orientation on open & immersive sticky mode
+    val originalOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
 
     DisposableEffect(Unit) {
-        // Enforce landscape orientation immediately
-        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        val media = currentMedia
+        val width = media?.width ?: 1920
+        val height = media?.height ?: 1080
+        val isPortrait = height > width
+
+        // Enforce orientation based on video dimensions immediately BEFORE ExoPlayer starts
+        if (isPortrait) {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        } else {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        }
         
+        // Setup orientation event listener to detect physical manual rotation as an override
+        val orientationEventListener = object : android.view.OrientationEventListener(context) {
+            private var initialMatched = false
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == android.view.OrientationEventListener.ORIENTATION_UNKNOWN) return
+                
+                val physicalIsLandscape = (orientation in 60..120) || (orientation in 240..300)
+                val physicalIsPortrait = (orientation in 0..30) || (orientation in 330..360) || (orientation in 150..210)
+
+                if (initialMatched) {
+                    if (physicalIsLandscape && isPortrait) {
+                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR
+                    } else if (physicalIsPortrait && !isPortrait) {
+                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR
+                    }
+                } else {
+                    if ((physicalIsPortrait && isPortrait) || (physicalIsLandscape && !isPortrait)) {
+                        initialMatched = true
+                    }
+                }
+            }
+        }
+        if (orientationEventListener.canDetectOrientation()) {
+            orientationEventListener.enable()
+        }
+
         // Hide status and navigation bars using WindowInsetsController immersive sticky mode
         val window = activity?.window
         if (window != null) {
@@ -203,7 +248,8 @@ fun VideoPlayerScreen(
         }
         
         onDispose {
-            // Restore original orientation on exit
+            orientationEventListener.disable()
+            // Restore original orientation on exit to SCREEN_ORIENTATION_UNSPECIFIED
             activity?.requestedOrientation = originalOrientation
             
             // Restore status and navigation bars on exit
@@ -213,11 +259,11 @@ fun VideoPlayerScreen(
             }
             
             // Save state progress locally
-            currentMedia?.let { media ->
+            currentMedia?.let { mediaFile ->
                 val progress = exoPlayer.currentPosition
                 val duration = exoPlayer.duration
                 if (duration > 0) {
-                    viewModel.saveHistoryProgress(media.id, progress, duration)
+                    viewModel.saveHistoryProgress(mediaFile.id, progress, duration)
                 }
             }
         }
@@ -415,9 +461,7 @@ fun VideoPlayerScreen(
                 val activeCue = if (loadedSubtitleCues.isNotEmpty()) {
                     loadedSubtitleCues.find { targetMs in it.startMs..it.endMs }
                 } else {
-                    SubtitleParser.getDemoCuesForTime(currentMedia!!.id).find {
-                        targetMs in it.startMs..it.endMs
-                    }
+                    null
                 }
                 
                 if (activeCue != null) {
@@ -549,12 +593,14 @@ fun VideoPlayerScreen(
                             IconButton(onClick = { showSettingsPanel = true }) {
                                 Icon(Icons.Default.Settings, contentDescription = "Play Configurations", tint = Color.White)
                             }
-                            IconButton(onClick = { showSubtitlesPanel = true }) {
-                                Icon(
-                                    Icons.Default.Subtitles,
-                                    contentDescription = "Subtitle Configurations",
-                                    tint = if (currentMedia?.subtitlePath?.isNotEmpty() == true) Color(0xFF00E5FF) else Color.White
-                                )
+                            if (activeSubtitleFile != null) {
+                                IconButton(onClick = { showSubtitlesPanel = true }) {
+                                    Icon(
+                                        Icons.Default.Subtitles,
+                                        contentDescription = "Subtitle Configurations",
+                                        tint = Color(0xFF00E5FF)
+                                    )
+                                }
                             }
                             IconButton(onClick = { showScreenshotDialog = true }) {
                                 Icon(Icons.Default.CameraAlt, contentDescription = "Frame Shot", tint = Color.White)

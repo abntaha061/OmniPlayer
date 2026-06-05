@@ -121,9 +121,17 @@ class MainActivity : ComponentActivity() {
                 }
 
                 LaunchedEffect(currentMedia) {
-                    if (currentMedia != null) {
-                        navController.navigate("player") {
-                            launchSingleTop = true
+                    val media = currentMedia
+                    if (media != null) {
+                        val extension = media.path.substringAfterLast(".").lowercase()
+                        val isAudio = media.videoCodec == "Audio Only" || 
+                                listOf("mp3", "flac", "aac", "m4a", "ogg", "wav", "opus", "wma", "alac").contains(extension)
+                        if (isAudio) {
+                            viewModel.activeTab.value = "music"
+                        } else {
+                            navController.navigate("player") {
+                                launchSingleTop = true
+                            }
                         }
                     }
                 }
@@ -319,7 +327,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainTabbedShell(viewModel: MediaViewModel) {
-    var selectedScreen by rememberSaveable { mutableStateOf("videos") }
+    val selectedScreen by viewModel.activeTab.collectAsStateWithLifecycle()
 
     Scaffold(
         bottomBar = {
@@ -328,21 +336,21 @@ fun MainTabbedShell(viewModel: MediaViewModel) {
             ) {
                 NavigationBarItem(
                     selected = selectedScreen == "videos",
-                    onClick = { selectedScreen = "videos" },
+                    onClick = { viewModel.activeTab.value = "videos" },
                     icon = { Icon(Icons.Default.PlayCircle, contentDescription = "Videos") },
                     label = { Text("Videos") },
                     modifier = Modifier.testTag("nav_item_videos")
                 )
                 NavigationBarItem(
                     selected = selectedScreen == "music",
-                    onClick = { selectedScreen = "music" },
+                    onClick = { viewModel.activeTab.value = "music" },
                     icon = { Icon(Icons.Default.MusicNote, contentDescription = "Music tracks") },
                     label = { Text("Music") },
                     modifier = Modifier.testTag("nav_item_music")
                 )
                 NavigationBarItem(
                     selected = selectedScreen == "me",
-                    onClick = { selectedScreen = "me" },
+                    onClick = { viewModel.activeTab.value = "me" },
                     icon = { Icon(Icons.Default.Person, contentDescription = "Stats, Settings and secure Vault") },
                     label = { Text("Me") },
                     modifier = Modifier.testTag("nav_item_me")
