@@ -40,6 +40,13 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
     val currentMedia = playerManager.currentMedia
     val isPlaying = playerManager.isPlaying
 
+    private val _isInPipMode = MutableStateFlow(false)
+    val isInPipMode: StateFlow<Boolean> = _isInPipMode.asStateFlow()
+
+    fun setInPipMode(active: Boolean) {
+        _isInPipMode.value = active
+    }
+
     // Searching and filtering
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -84,6 +91,26 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectMedia(media: MediaFile) {
         playerManager.play(media)
+    }
+
+    fun updateDecoderMode(id: Long, decoderMode: String) {
+        viewModelScope.launch {
+            repository.updateDecoderMode(id, decoderMode)
+            val current = playerManager.currentMedia.value
+            if (current != null && current.id == id) {
+                playerManager.setCurrentMedia(current.copy(decoderMode = decoderMode))
+            }
+        }
+    }
+
+    fun updateSubtitlePath(id: Long, subtitlePath: String) {
+        viewModelScope.launch {
+            repository.updateSubtitlePath(id, subtitlePath)
+            val current = playerManager.currentMedia.value
+            if (current != null && current.id == id) {
+                playerManager.setCurrentMedia(current.copy(subtitlePath = subtitlePath))
+            }
+        }
     }
 
     fun saveHistoryProgress(mediaId: Long, progress: Long, duration: Long) {

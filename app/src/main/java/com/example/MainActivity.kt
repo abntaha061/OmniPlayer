@@ -1,10 +1,21 @@
 package com.example
 
 import android.Manifest
+import android.app.PendingIntent
+import android.app.PictureInPictureParams
+import android.app.RemoteAction
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.util.Rational
+import androidx.annotation.RequiresApi
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -30,6 +41,38 @@ import com.example.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
 
+    private var mediaViewModel: MediaViewModel? = null
+
+    private val pipReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == "com.example.ACTION_PLAY_PAUSE") {
+                mediaViewModel?.let { vm ->
+                    val player = vm.playerManager.getPlayer()
+                    if (player.isPlaying) {
+                        player.pause()
+                    } else {
+                        player.play()
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        updatePiPParams(player.isPlaying)
+                    }
+                }
+            } else if (intent?.action == "com.example.ACTION_CLOSE") {
+                mediaViewModel?.let { vm ->
+                    val current = vm.currentMedia.value
+                    if (current != null) {
+                        vm.playerManager.stopAndSaveProgress { progress, duration ->
+                            vm.saveHistoryProgress(current.id, progress, duration)
+                        }
+                    }
+                    vm.playerManager.release()
+                    vm.playerManager.setCurrentMedia(null)
+                }
+                finish()
+            }
+        }
+    }
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -44,10 +87,29 @@ class MainActivity : ComponentActivity() {
         // Trigger storage permission requests for Android <= 12 and >= 13 (READ_MEDIA_VIDEO)
         requestPermissionsIfNeeded()
 
+        val filter = IntentFilter().apply {
+            addAction("com.example.ACTION_PLAY_PAUSE")
+            addAction("com.example.ACTION_CLOSE")
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(pipReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(pipReceiver, filter)
+        }
+
         setContent {
             MyApplicationTheme {
-                val mediaViewModel: MediaViewModel = viewModel()
-                val currentMedia by mediaViewModel.currentMedia.collectAsStateWithLifecycle()
+                val viewModel: MediaViewModel = viewModel()
+                mediaViewModel = viewModel
+                val currentMedia by viewModel.currentMedia.collectAsStateWithLifecycle()
+                val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
+                val isPipMode by viewModel.isInPipMode.collectAsStateWithLifecycle()
+
+                LaunchedEffect(isPlaying, isPipMode) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isPipMode) {
+                        updatePiPParams(isPlaying)
+                    }
+                }
                 
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -56,23 +118,151 @@ class MainActivity : ComponentActivity() {
                     if (currentMedia != null) {
                         // Full Screen Overlay Video Player is active!
                         VideoPlayerScreen(
-                            viewModel = mediaViewModel,
+                            viewModel = viewModel,
                             onBack = {
-                                mediaViewModel.playerManager.stopAndSaveProgress { progress, duration ->
-                                    mediaViewModel.saveHistoryProgress(currentMedia!!.id, progress, duration)
+                                viewModel.playerManager.stopAndSaveProgress { progress, duration ->
+                                    viewModel.saveHistoryProgress(currentMedia!!.id, progress, duration)
                                 }
-                                // Setting current media to null exits the player overlay
-                                mediaViewModel.playerManager.play(currentMedia!!) // Force-pause release
-                                mediaViewModel.playerManager.release()
+                                viewModel.playerManager.release()
+                                viewModel.playerManager.setCurrentMedia(null)
                             }
                         )
                     } else {
                         // Regular tabbed shell navigator layout
-                        MainTabbedShell(viewModel = mediaViewModel)
+                        MainTabbedShell(viewModel = viewModel)
                     }
                 }
             }
         }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        triggerPictureInPicture()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode) {
+            // Already in PiP mode
+        } else {
+            triggerPictureInPicture()
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            unregisterReceiver(pipReceiver)
+        } catch (e: Exception) {
+            // Ignore
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        mediaViewModel?.setInPipMode(isInPictureInPictureMode)
+    }
+
+    private fun isPiPSupported(): Boolean {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+    }
+
+    private fun triggerPictureInPicture() {
+        if (isPiPSupported()) {
+            val vm = mediaViewModel ?: return
+            val current = vm.currentMedia.value
+            if (current != null && vm.playerManager.isPlaying.value) {
+                val isPlaying = vm.playerManager.isPlaying.value
+                val builder = PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational(16, 9))
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val playPauseIntent = Intent("com.example.ACTION_PLAY_PAUSE")
+                    val playPausePendingIntent = PendingIntent.getBroadcast(
+                        this,
+                        1,
+                        playPauseIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    
+                    val playPauseIconRes = if (isPlaying) {
+                        android.R.drawable.ic_media_pause
+                    } else {
+                        android.R.drawable.ic_media_play
+                    }
+                    val playPauseAction = RemoteAction(
+                        Icon.createWithResource(this, playPauseIconRes),
+                        if (isPlaying) "Pause" else "Play",
+                        if (isPlaying) "Pause video" else "Play video",
+                        playPausePendingIntent
+                    )
+
+                    val closeIntent = Intent("com.example.ACTION_CLOSE")
+                    val closePendingIntent = PendingIntent.getBroadcast(
+                        this,
+                        2,
+                        closeIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    val closeAction = RemoteAction(
+                        Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
+                        "Close",
+                        "Close video player",
+                        closePendingIntent
+                    )
+
+                    builder.setActions(listOf(playPauseAction, closeAction))
+                }
+                enterPictureInPictureMode(builder.build())
+            }
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun updatePiPParams(isPlaying: Boolean) {
+        val playPauseIntent = Intent("com.example.ACTION_PLAY_PAUSE")
+        val playPausePendingIntent = PendingIntent.getBroadcast(
+            this,
+            1,
+            playPauseIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        
+        val playPauseIconRes = if (isPlaying) {
+            android.R.drawable.ic_media_pause
+        } else {
+            android.R.drawable.ic_media_play
+        }
+        val playPauseAction = RemoteAction(
+            Icon.createWithResource(this, playPauseIconRes),
+            if (isPlaying) "Pause" else "Play",
+            if (isPlaying) "Pause video" else "Play video",
+            playPausePendingIntent
+        )
+
+        val closeIntent = Intent("com.example.ACTION_CLOSE")
+        val closePendingIntent = PendingIntent.getBroadcast(
+            this,
+            2,
+            closeIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val closeAction = RemoteAction(
+            Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
+            "Close",
+            "Close video player",
+            closePendingIntent
+        )
+
+        val builder = PictureInPictureParams.Builder()
+            .setAspectRatio(Rational(16, 9))
+            .setActions(listOf(playPauseAction, closeAction))
+        
+        setPictureInPictureParams(builder.build())
     }
 
     private fun requestPermissionsIfNeeded() {

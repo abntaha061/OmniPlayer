@@ -34,6 +34,12 @@ interface MediaDao {
     @Query("UPDATE media_files SET isFavorite = :isFav WHERE id = :id")
     suspend fun updateFavorite(id: Long, isFav: Boolean)
 
+    @Query("UPDATE media_files SET decoderMode = :decoderMode WHERE id = :id")
+    suspend fun updateDecoderMode(id: Long, decoderMode: String)
+
+    @Query("UPDATE media_files SET subtitlePath = :subtitlePath WHERE id = :id")
+    suspend fun updateSubtitlePath(id: Long, subtitlePath: String)
+
     @Delete
     suspend fun deleteMedia(media: MediaFile)
 

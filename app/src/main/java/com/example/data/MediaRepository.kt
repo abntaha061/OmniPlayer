@@ -26,6 +26,10 @@ class MediaRepository(
 
     suspend fun updateResumePosition(id: Long, position: Long) = mediaDao.updateResumePosition(id, position)
 
+    suspend fun updateDecoderMode(id: Long, decoderMode: String) = mediaDao.updateDecoderMode(id, decoderMode)
+
+    suspend fun updateSubtitlePath(id: Long, subtitlePath: String) = mediaDao.updateSubtitlePath(id, subtitlePath)
+
     suspend fun insertStream(stream: NetworkStream) = mediaDao.insertStream(stream)
 
     suspend fun deleteStream(id: Long) = mediaDao.deleteStream(id)

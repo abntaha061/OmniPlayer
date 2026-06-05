@@ -20,7 +20,8 @@ data class MediaFile(
     val resumePosition: Long = 0, // Location in ms to resume
     var isFavorite: Boolean = false,
     val thumbnailUri: String = "",
-    val subtitlePath: String = ""
+    val subtitlePath: String = "",
+    val decoderMode: String = "AUTO"
 ) {
     val isStream: Boolean get() = path.startsWith("http://") || path.startsWith("https://") || path.startsWith("rtsp://")
 }

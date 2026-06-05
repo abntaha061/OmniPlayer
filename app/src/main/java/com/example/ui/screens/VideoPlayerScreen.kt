@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.app.Activity
 import android.content.Context
+import android.util.Log
 import android.media.AudioManager
 import android.view.WindowManager
 import androidx.annotation.OptIn
@@ -42,9 +43,27 @@ import com.example.player.PlayerManager
 import com.example.player.VideoResizeMode
 import com.example.ui.MediaViewModel
 import com.example.utils.SubtitleParser
+import android.net.Uri
+import android.content.Intent
+import com.example.MainActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import kotlinx.coroutines.Dispatchers
+import java.io.File
+import java.io.FileOutputStream
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+
+private fun copyUriToCache(context: Context, uri: Uri, fileName: String): File {
+    val cacheFile = File(context.cacheDir, "temp_sub_${System.currentTimeMillis()}_$fileName")
+    context.contentResolver.openInputStream(uri)?.use { input ->
+        FileOutputStream(cacheFile).use { output ->
+            input.copyTo(output)
+        }
+    }
+    return cacheFile
+}
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -83,6 +102,41 @@ fun VideoPlayerScreen(
     var showSubtitles by remember { mutableStateOf(true) }
     var currentSubDelay by remember { mutableStateOf(0) } // milliseconds delay
     val playbackPosition = remember { mutableStateOf(0L) }
+
+    val isPipMode by viewModel.isInPipMode.collectAsStateWithLifecycle()
+    var showSubtitlesPanel by remember { mutableStateOf(false) }
+    var fontStyleSize by remember { mutableStateOf("medium") } // small, medium, large
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = { uri ->
+            if (uri != null) {
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        val fileName = "custom_sub_${System.currentTimeMillis()}.srt"
+                        val cachedFile = copyUriToCache(context, uri, fileName)
+                        viewModel.updateSubtitlePath(currentMedia!!.id, cachedFile.absolutePath)
+                    } catch (e: Exception) {
+                        Log.e("VideoPlayerScreen", "Error picking subtitle URI: ${e.message}")
+                    }
+                }
+            }
+        }
+    )
+
+    val loadedSubtitleCues = remember(currentMedia?.subtitlePath) {
+        val path = currentMedia?.subtitlePath ?: ""
+        if (path.isNotEmpty() && File(path).exists()) {
+            try {
+                val content = File(path).readText()
+                SubtitleParser.parse(content)
+            } catch (e: Exception) {
+                emptyList()
+            }
+        } else {
+            emptyList()
+        }
+    }
     
     // Periodically update subtitle pointer position
     LaunchedEffect(isPlaying) {
@@ -121,12 +175,42 @@ fun VideoPlayerScreen(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .testTag("video_player_box")
-    ) {
+    if (isPipMode) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onDoubleTap = {
+                            val intent = Intent(context, MainActivity::class.java).apply {
+                                flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            }
+                            context.startActivity(intent)
+                        }
+                    )
+                }
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        player = exoPlayer
+                        useController = false
+                        setBackgroundColor(android.graphics.Color.BLACK)
+                    }
+                },
+                update = { view ->
+                    view.player = exoPlayer
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    } else {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .testTag("video_player_box")
+        ) {
         // 1. Gesture detector & Pinch to Zoom container wrapper
         Box(
             modifier = Modifier
@@ -251,15 +335,25 @@ fun VideoPlayerScreen(
             ) {
                 // Read active cue from parser
                 val targetMs = playbackPosition.value + currentSubDelay
-                val activeCue = SubtitleParser.getDemoCuesForTime(currentMedia!!.id).find {
-                    targetMs in it.startMs..it.endMs
+                val activeCue = if (loadedSubtitleCues.isNotEmpty()) {
+                    loadedSubtitleCues.find { targetMs in it.startMs..it.endMs }
+                } else {
+                    SubtitleParser.getDemoCuesForTime(currentMedia!!.id).find {
+                        targetMs in it.startMs..it.endMs
+                    }
                 }
                 
                 if (activeCue != null) {
+                    val computedFontSize = when (fontStyleSize) {
+                        "small" -> 14.sp
+                        "medium" -> 20.sp
+                        "large" -> 26.sp
+                        else -> 20.sp
+                    }
                     Text(
                         text = activeCue.text,
                         color = Color.White,
-                        fontSize = settings.subtitleSize.sp,
+                        fontSize = computedFontSize,
                         fontWeight = FontWeight.SemiBold,
                         textAlign = TextAlign.Center,
                         modifier = Modifier
@@ -342,7 +436,7 @@ fun VideoPlayerScreen(
                                     maxLines = 1
                                 )
                                 Text(
-                                    text = "${currentMedia?.width}x${currentMedia?.height} • ${currentMedia?.videoCodec ?: "Stream"}",
+                                    text = "${currentMedia?.width}x${currentMedia?.height} • ${currentMedia?.videoCodec ?: "Stream"} • decoder: ${currentMedia?.decoderMode ?: "AUTO"}",
                                     color = Color.LightGray,
                                     fontSize = 11.sp
                                 )
@@ -351,17 +445,38 @@ fun VideoPlayerScreen(
 
                         // Top right quick action icons
                         Row {
+                            IconButton(
+                                onClick = {
+                                    val current = currentMedia
+                                    if (current != null) {
+                                        val modes = listOf("AUTO", "HW", "HW+", "SW")
+                                        val curIdx = modes.indexOf(current.decoderMode).coerceAtLeast(0)
+                                        val nextMode = modes[(curIdx + 1) % modes.size]
+                                        viewModel.updateDecoderMode(current.id, nextMode)
+                                        playerManager.recreatePlayer()
+                                        
+                                        gestureIndicatorIcon = Icons.Default.DeveloperMode
+                                        gestureIndicatorValue = "Decoder: $nextMode"
+                                        scope.launch {
+                                            delay(1200)
+                                            gestureIndicatorValue = null
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.DeveloperMode, contentDescription = "decoder Mode Toggle", tint = Color(0xFFFFC107))
+                            }
                             IconButton(onClick = { showEqualizerPanel = true }) {
                                 Icon(Icons.Default.GraphicEq, contentDescription = "Equalizer", tint = Color(0xFF00E5FF))
                             }
                             IconButton(onClick = { showSettingsPanel = true }) {
                                 Icon(Icons.Default.Settings, contentDescription = "Play Configurations", tint = Color.White)
                             }
-                            IconButton(onClick = { showSubtitles = !showSubtitles }) {
+                            IconButton(onClick = { showSubtitlesPanel = true }) {
                                 Icon(
-                                    if (showSubtitles) Icons.Default.Subtitles else Icons.Default.SubtitlesOff,
-                                    contentDescription = "Toggle Subtitles",
-                                    tint = if (showSubtitles) Color(0xFF00E5FF) else Color.White
+                                    Icons.Default.Subtitles,
+                                    contentDescription = "Subtitle Configurations",
+                                    tint = if (currentMedia?.subtitlePath?.isNotEmpty() == true) Color(0xFF00E5FF) else Color.White
                                 )
                             }
                             IconButton(onClick = { showScreenshotDialog = true }) {
@@ -648,6 +763,117 @@ fun VideoPlayerScreen(
         )
     }
 
+    // Custom Subtitle Configurations Panel Dialog
+    if (showSubtitlesPanel && currentMedia != null) {
+        AlertDialog(
+            onDismissRequest = { showSubtitlesPanel = false },
+            title = { Text("Subtitle Configurations", color = Color.White) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Button(
+                        onClick = {
+                            try {
+                                filePickerLauncher.launch(arrayOf("*/*"))
+                            } catch (e: Exception) {
+                                Log.e("VideoPlayerScreen", "Error launching file picker: ${e.message}")
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color.Black),
+                        modifier = Modifier.fillMaxWidth().testTag("select_sub_file_btn")
+                    ) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+                        Text("Import Subtitle File (.srt, .vtt, .ass, .sub)", fontWeight = FontWeight.Bold)
+                    }
+                    
+                    Text(
+                        text = "Active: ${currentMedia?.subtitlePath?.substringAfterLast("/") ?: "Default / Demo"}",
+                        color = Color.LightGray,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
+
+                    Text("Sync Offset (Subtitle Delay)", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = { currentSubDelay -= 500 },
+                            modifier = Modifier.background(Color.White.copy(alpha = 0.15f), CircleShape)
+                        ) {
+                            Icon(Icons.Default.Remove, contentDescription = "Minus 500ms", tint = Color.White)
+                        }
+                        
+                        Text(
+                            text = if (currentSubDelay >= 0) "+${currentSubDelay}ms" else "${currentSubDelay}ms",
+                            color = Color.White,
+                            modifier = Modifier.weight(1f),
+                            textAlign = TextAlign.Center,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        
+                        IconButton(
+                            onClick = { currentSubDelay += 500 },
+                            modifier = Modifier.background(Color.White.copy(alpha = 0.15f), CircleShape)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = "Add 500ms", tint = Color.White)
+                        }
+                    }
+                    
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
+
+                    Text("Subtitle Font Size", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("small" to "Small", "medium" to "Medium", "large" to "Large").forEach { (id, label) ->
+                            val isSelected = fontStyleSize == id
+                            Button(
+                                onClick = { fontStyleSize = id },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isSelected) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.15f),
+                                    contentColor = if (isSelected) Color.Black else Color.White
+                                ),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                            ) {
+                                Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { showSubtitlesPanel = false },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF00E5FF))
+                ) {
+                    Text("Done", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                if (currentMedia?.subtitlePath?.isNotEmpty() == true) {
+                    TextButton(
+                        onClick = {
+                            viewModel.updateSubtitlePath(currentMedia!!.id, "")
+                            showSubtitlesPanel = false
+                        },
+                        colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
+                    ) {
+                        Text("Clear Subtitles", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            },
+            containerColor = Color(0xFF1E1E24)
+        )
+    }
+
     // C. Screenshot alert dialog confirmation
     if (showScreenshotDialog) {
         AlertDialog(
@@ -669,6 +895,7 @@ fun VideoPlayerScreen(
             },
             containerColor = Color(0xFF161E2E)
         )
+    }
     }
 }
 

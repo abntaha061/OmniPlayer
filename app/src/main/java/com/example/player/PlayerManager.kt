@@ -13,6 +13,10 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
+import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import com.example.domain.MediaFile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -38,9 +42,55 @@ class PlayerManager(private val context: Context) {
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
+    var activeDecoderMode: String = "AUTO"
+
+    fun setCurrentMedia(media: MediaFile?) {
+        _currentMedia.value = media
+        if (media != null) {
+            activeDecoderMode = media.decoderMode
+        }
+    }
+
+    fun recreatePlayer() {
+        val player = exoPlayer ?: return
+        val pos = player.currentPosition
+        val playing = player.isPlaying
+        
+        release()
+        
+        val newPlayer = getPlayer()
+        val media = _currentMedia.value
+        if (media != null) {
+            play(media, pos)
+            if (!playing) {
+                newPlayer.pause()
+            }
+        }
+    }
+
     fun getPlayer(): ExoPlayer {
         if (exoPlayer == null) {
-            exoPlayer = ExoPlayer.Builder(context).build().apply {
+            val customSelector = object : MediaCodecSelector {
+                override fun getDecoderInfos(
+                    mimeType: String,
+                    requiresSecureDecoder: Boolean,
+                    requiresTunnelingDecoder: Boolean
+                ): List<MediaCodecInfo> {
+                    val decoders = MediaCodecUtil.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
+                    val filtered = when (activeDecoderMode) {
+                        "HW", "HW+" -> decoders.filter { it.hardwareAccelerated && !it.softwareOnly }
+                        "SW" -> decoders.filter { it.softwareOnly }
+                        else -> decoders
+                    }
+                    return if (filtered.isEmpty()) decoders else filtered
+                }
+            }
+            
+            val renderersFactory = DefaultRenderersFactory(context).apply {
+                setMediaCodecSelector(customSelector)
+            }
+
+            exoPlayer = ExoPlayer.Builder(context, renderersFactory).build().apply {
                 repeatMode = Player.REPEAT_MODE_OFF
                 playWhenReady = true
                 addListener(object : Player.Listener {
@@ -59,9 +109,10 @@ class PlayerManager(private val context: Context) {
         return exoPlayer!!
     }
 
-    fun play(media: MediaFile) {
+    fun play(media: MediaFile, seekToPos: Long? = null) {
         val player = getPlayer()
         _currentMedia.value = media
+        activeDecoderMode = media.decoderMode
         
         val mediaItem = if (media.isStream) {
             val builder = MediaItem.Builder()
@@ -72,16 +123,47 @@ class PlayerManager(private val context: Context) {
             } else if (media.path.contains(".mpd")) {
                 builder.setMimeType(MimeTypes.APPLICATION_MPD)
             }
+
+            if (media.subtitlePath.isNotEmpty()) {
+                val subtitleUri = Uri.parse(media.subtitlePath)
+                val mimeType = when {
+                    media.subtitlePath.endsWith(".vtt", ignoreCase = true) -> MimeTypes.TEXT_VTT
+                    media.subtitlePath.endsWith(".ass", ignoreCase = true) -> MimeTypes.TEXT_SSA
+                    media.subtitlePath.endsWith(".ssa", ignoreCase = true) -> MimeTypes.TEXT_SSA
+                    else -> MimeTypes.APPLICATION_SUBRIP
+                }
+                val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(subtitleUri)
+                    .setMimeType(mimeType)
+                    .setLanguage("en")
+                    .build()
+                builder.setSubtitleConfigurations(listOf(subtitleConfig))
+            }
             builder.build()
         } else {
             val localFile = File(media.path)
-            MediaItem.fromUri(Uri.fromFile(localFile))
+            val builder = MediaItem.Builder().setUri(Uri.fromFile(localFile))
+            if (media.subtitlePath.isNotEmpty()) {
+                val subtitleFile = File(media.subtitlePath)
+                val mimeType = when {
+                    media.subtitlePath.endsWith(".vtt", ignoreCase = true) -> MimeTypes.TEXT_VTT
+                    media.subtitlePath.endsWith(".ass", ignoreCase = true) -> MimeTypes.TEXT_SSA
+                    media.subtitlePath.endsWith(".ssa", ignoreCase = true) -> MimeTypes.TEXT_SSA
+                    else -> MimeTypes.APPLICATION_SUBRIP
+                }
+                val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(subtitleFile))
+                    .setMimeType(mimeType)
+                    .setLanguage("en")
+                    .build()
+                builder.setSubtitleConfigurations(listOf(subtitleConfig))
+            }
+            builder.build()
         }
 
         player.setMediaItem(mediaItem)
         player.prepare()
-        if (media.resumePosition > 0) {
-            player.seekTo(media.resumePosition)
+        val targetPos = seekToPos ?: media.resumePosition
+        if (targetPos > 0) {
+            player.seekTo(targetPos)
         }
         player.play()
         
