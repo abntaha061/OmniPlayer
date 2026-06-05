@@ -1,0 +1,6 @@
+{
+  "name": "Aura Player",
+  "description": "A professional, feature-rich Media Player app built on Jetpack Compose and Media3 ExoPlayer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
