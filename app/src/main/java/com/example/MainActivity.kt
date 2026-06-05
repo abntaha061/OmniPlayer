@@ -40,6 +40,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.MediaViewModel
 import com.example.ui.screens.*
+import androidx.compose.ui.graphics.asImageBitmap
 import com.example.ui.theme.MyApplicationTheme
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.navigation.compose.NavHost
@@ -584,36 +585,7 @@ fun MovingAuroraBackground(
 }
 
 fun getAuroraColorsForTrack(track: MediaFile): Pair<Color, Color> {
-    val name = track.displayName.lowercase()
-    return when {
-        name.contains("khaibt") || name.contains("خيبت") -> Pair(Color(0xFF4A0A0A), Color(0xFF8B1A1A)) 
-        name.contains("bazat") || name.contains("باظت") -> Pair(Color(0xFF0D1117), Color(0xFFE8A838)) 
-        name.contains("tesla") -> Pair(Color(0xFF0A2A4A), Color(0xFF00C8FF)) 
-        name.contains("segara") || name.contains("سيجارة") -> Pair(Color(0xFF1A0533), Color(0xFF9B59B6)) 
-        name.contains("sindbad") -> Pair(Color(0xFF1A1200), Color(0xFFF0A500)) 
-        name.contains("masr7ya") || name.contains("مسرحية") -> Pair(Color(0xFF0D1F0D), Color(0xFF2ECC71)) 
-        name.contains("yoram") || name.contains("يرام") -> Pair(Color(0xFF1A1A1A), Color(0xFFE74C3C)) 
-        name.contains("toht") || name.contains("تهت") -> Pair(Color(0xFF1A0A00), Color(0xFFFF6B35)) 
-        name.contains("ayam") || name.contains("ليالي") -> Pair(Color(0xFF001A33), Color(0xFF3498DB))
-        name.contains("emshy") || name.contains("امشي") -> Pair(Color(0xFF1A1A0D), Color(0xFFF1C40F))
-        name.contains("akher") || name.contains("اخر") -> Pair(Color(0xFF0D0D1A), Color(0xFF8E44AD))
-        name.contains("laffa") || name.contains("لفة") -> Pair(Color(0xFF1A0D00), Color(0xFFE67E22))
-        name.contains("ebtadena") || name.contains("ابتدينا") -> Pair(Color(0xFF001A1A), Color(0xFF1ABC9C))
-        name.contains("7adota") || name.contains("حدوتة") -> Pair(Color(0xFF1A0A1A), Color(0xFFE91E8C))
-        name.contains("7obk") || name.contains("حبك") -> Pair(Color(0xFF0A1A0A), Color(0xFF27AE60))
-        else -> {
-            val hash = track.displayName.hashCode()
-            val colors = listOf(
-                Pair(Color(0xFF00E5FF), Color(0xFFFF007F)), 
-                Pair(Color(0xFFCCFF00), Color(0xFFE040FB)), 
-                Pair(Color(0xFFFFD700), Color(0xFF00E5FF)), 
-                Pair(Color(0xFF06D6A0), Color(0xFF7209B7)), 
-                Pair(Color(0xFFFF5722), Color(0xFF00E5FF))
-            )
-            val index = Math.abs(hash) % colors.size
-            colors[index]
-        }
-    }
+    return com.example.utils.AlbumArtHelper.getColorsForTrack(track)
 }
 
 @Composable
@@ -637,6 +609,13 @@ fun MiniPlayerComponent(
     val duration = media.duration.coerceAtLeast(1L)
     var currentPositionMs by remember { mutableStateOf(0L) }
     var currentPlaybackProgress by remember { mutableStateOf(0f) }
+
+    val albumArt = remember(media.path) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(media.path) {
+        withContext(kotlinx.coroutines.Dispatchers.IO) {
+            albumArt.value = com.example.utils.AlbumArtHelper.getCachedBitmap(media.path)
+        }
+    }
 
     LaunchedEffect(isPlaying, media.id) {
         while (isPlaying) {
@@ -676,7 +655,15 @@ fun MiniPlayerComponent(
                         .clip(RoundedCornerShape(8.dp))
                         .background(Color.DarkGray)
                 ) {
-                    if (media.thumbnailUri.isNotEmpty()) {
+                    val art = albumArt.value
+                    if (art != null) {
+                        androidx.compose.foundation.Image(
+                            bitmap = art.asImageBitmap(),
+                            contentDescription = "Track Artwork",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else if (media.thumbnailUri.isNotEmpty()) {
                         AsyncImage(
                             model = media.thumbnailUri,
                             contentDescription = "Track Artwork",
@@ -684,12 +671,23 @@ fun MiniPlayerComponent(
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
-                        Icon(
-                            imageVector = Icons.Default.MusicNote,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.6f),
-                            modifier = Modifier.align(Alignment.Center)
-                        )
+                        val trackColors = com.example.utils.AlbumArtHelper.getColorsForTrack(media)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.linearGradient(
+                                        colors = listOf(trackColors.first, trackColors.second)
+                                    )
+                                )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MusicNote,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.85f),
+                                modifier = Modifier.align(Alignment.Center).size(18.dp)
+                            )
+                        }
                     }
                 }
 
@@ -761,6 +759,13 @@ fun FullLyricsPopupScreen(
 
     var trackLyrics by remember(track.id) { mutableStateOf<List<LyricLine>?>(null) }
 
+    val albumArt = remember(track.path) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(track.path) {
+        withContext(kotlinx.coroutines.Dispatchers.IO) {
+            albumArt.value = com.example.utils.AlbumArtHelper.getCachedBitmap(track.path)
+        }
+    }
+
     LaunchedEffect(track.path) {
         withContext(kotlinx.coroutines.Dispatchers.IO) {
             val file = findLrcFile(track.path)
@@ -790,7 +795,18 @@ fun FullLyricsPopupScreen(
     ) {
         MovingAuroraBackground(color1 = colors.first, color2 = colors.second)
         
-        if (track.thumbnailUri.isNotEmpty()) {
+        val art = albumArt.value
+        if (art != null) {
+            androidx.compose.foundation.Image(
+                bitmap = art.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(0.15f)
+                    .blur(25.dp)
+            )
+        } else if (track.thumbnailUri.isNotEmpty()) {
             AsyncImage(
                 model = track.thumbnailUri,
                 contentDescription = null,

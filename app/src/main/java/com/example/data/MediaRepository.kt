@@ -236,6 +236,39 @@ class MediaRepository(
                 }
             }
 
+            // 3. Directly scan "/storage/emulated/0/Music" as requested to guarantee finding all local mp3 pieces
+            try {
+                val musicFolder = File("/storage/emulated/0/Music")
+                if (musicFolder.exists() && musicFolder.isDirectory) {
+                    val files = musicFolder.listFiles()
+                    files?.filter { it.isFile && it.name.lowercase().endsWith(".mp3") }?.forEach { f ->
+                        val absolutePath = f.absolutePath
+                        val alreadyAdded = localFiles.any { it.path.equals(absolutePath, ignoreCase = true) }
+                        if (!alreadyAdded) {
+                            val name = f.name
+                            val size = f.length()
+                            val dateAdded = f.lastModified()
+                            val mediaFile = MediaFile(
+                                path = absolutePath,
+                                name = name,
+                                displayName = name.substringBeforeLast("."),
+                                folderPath = "/storage/emulated/0/Music",
+                                size = size,
+                                duration = 200000L, // placeholder, will adjust in player
+                                width = 0,
+                                height = 0,
+                                videoCodec = "Audio Only",
+                                audioCodec = "Local Audio",
+                                dateAdded = dateAdded
+                            )
+                            localFiles.add(mediaFile)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MediaRepository", "Direct filesystem scan failed: ${e.message}")
+            }
+
             // Batch inserting local files and pre-populating with Arabic music tracks requested by user
             val presets = listOf(
                 MediaFile(

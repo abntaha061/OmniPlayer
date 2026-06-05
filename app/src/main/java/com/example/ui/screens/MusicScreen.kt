@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import androidx.compose.ui.graphics.asImageBitmap
 import com.example.domain.MediaFile
 import com.example.ui.MediaViewModel
 import kotlinx.coroutines.delay
@@ -205,7 +206,7 @@ fun MusicScreen(
                     .fillMaxWidth()
             ) {
                 Text(
-                    text = "Tracklist (1472 songs)",
+                    text = "Tracklist (${musicFiles.size} songs)",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF00E5FF),
@@ -219,7 +220,15 @@ fun MusicScreen(
                 ) {
                     items(musicFiles) { track ->
                         val isCurrent = currentMedia?.id == track.id
-                        val itemColors = getSongColors(track.displayName)
+                        val itemColors = com.example.utils.AlbumArtHelper.getColorsForTrack(track)
+                        
+                        val albumArt = remember(track.path) { mutableStateOf<android.graphics.Bitmap?>(null) }
+                        LaunchedEffect(track.path) {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                albumArt.value = com.example.utils.AlbumArtHelper.getCachedBitmap(track.path)
+                            }
+                        }
+
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -243,12 +252,22 @@ fun MusicScreen(
                                         )
                                     )
                             ) {
-                                Icon(
-                                    Icons.Default.MusicNote,
-                                    contentDescription = null,
-                                    tint = Color.White.copy(alpha = 0.85f),
-                                    modifier = Modifier.align(Alignment.Center).size(20.dp)
-                                )
+                                val art = albumArt.value
+                                if (art != null) {
+                                    androidx.compose.foundation.Image(
+                                        bitmap = art.asImageBitmap(),
+                                        contentDescription = "Album Art",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Default.MusicNote,
+                                        contentDescription = null,
+                                        tint = Color.White.copy(alpha = 0.85f),
+                                        modifier = Modifier.align(Alignment.Center).size(20.dp)
+                                    )
+                                }
 
                                 if (isCurrent && isPlaying) {
                                     Box(
