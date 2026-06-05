@@ -1,289 +1,259 @@
 package com.example.ui
 
 import android.app.Application
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.os.CountDownTimer
-import android.util.Log
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKeys
+import android.os.IBinder
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.data.AppDatabase
-import com.example.data.MediaRepository
-import com.example.domain.MediaFile
-import com.example.domain.Playlist
-import com.example.player.PlayerManager
-import kotlinx.coroutines.flow.*
+import androidx.media3.common.Player
+import com.example.domain.LrcLine
+import com.example.domain.Song
+import com.example.domain.SubtitleStyle
+import com.example.domain.VideoFile
+import com.example.player.MusicService
+import com.example.utils.LyricsParser
+import com.example.utils.MediaLoader
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-
-private val Context.dataStore by preferencesDataStore(name = "aura_player_prefs")
+import kotlinx.coroutines.withContext
 
 class MediaViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val db = AppDatabase.getDatabase(application)
-    private val repository = MediaRepository(application, db.mediaDao())
-    val playerManager = PlayerManager(application)
+    private val context = application.applicationContext
 
-    // State flows
-    val allMedia: StateFlow<List<MediaFile>> = repository.allMedia
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    // Lists
+    private val _songs = MutableStateFlow<List<Song>>(emptyList())
+    val songs: StateFlow<List<Song>> = _songs.asStateFlow()
 
-    val privateMedia: StateFlow<List<MediaFile>> = repository.privateMedia
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val _videos = MutableStateFlow<List<VideoFile>>(emptyList())
+    val videos: StateFlow<List<VideoFile>> = _videos.asStateFlow()
 
-    val favorites: StateFlow<List<MediaFile>> = repository.favorites
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val _isLoading = MutableStateFlow(true)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    val playlists: StateFlow<List<Playlist>> = repository.playlists
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    // Current State
+    private val _currentSong = MutableStateFlow<Song?>(null)
+    val currentSong: StateFlow<Song?> = _currentSong.asStateFlow()
 
-    val watchHistory = repository.watchHistory
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val _isPlayingAudio = MutableStateFlow(false)
+    val isPlayingAudio: StateFlow<Boolean> = _isPlayingAudio.asStateFlow()
 
-    // Currently playing media
-    val currentMedia = playerManager.currentMedia
-    val isPlaying = playerManager.isPlaying
-    val activeTab = MutableStateFlow("videos")
-    val showFullScreenLyrics = MutableStateFlow(false)
-    val showHiFiCard = MutableStateFlow(true)
+    private val _audioPositionMs = MutableStateFlow(0L)
+    val audioPositionMs: StateFlow<Long> = _audioPositionMs.asStateFlow()
 
-    private val _isInPipMode = MutableStateFlow(false)
-    val isInPipMode: StateFlow<Boolean> = _isInPipMode.asStateFlow()
+    private val _audioProgress = MutableStateFlow(0f)
+    val audioProgress: StateFlow<Float> = _audioProgress.asStateFlow()
 
-    fun setInPipMode(active: Boolean) {
-        _isInPipMode.value = active
-    }
+    private val _lrcLines = MutableStateFlow<List<LrcLine>>(emptyList())
+    val lrcLines: StateFlow<List<LrcLine>> = _lrcLines.asStateFlow()
 
-    private val dataStore = application.dataStore
-    private val SORT_KEY = stringPreferencesKey("sort_key")
-    private val VIEW_MODE_KEY = stringPreferencesKey("view_mode_key")
+    // Service Connection
+    private var musicService: MusicService? = null
+    private val _isServiceBound = MutableStateFlow(false)
 
-    val sortPref: StateFlow<String> = dataStore.data
-        .map { prefs -> prefs[SORT_KEY] ?: "Name" }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Name")
+    // Subtitles Customize
+    private val _subtitleStyle = MutableStateFlow(SubtitleStyle())
+    val subtitleStyle: StateFlow<SubtitleStyle> = _subtitleStyle.asStateFlow()
 
-    val viewModePref: StateFlow<String> = dataStore.data
-        .map { prefs -> prefs[VIEW_MODE_KEY] ?: "Folders" }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Folders")
+    // Video Player Features
+    private val _videoSpeed = MutableStateFlow(1.0f)
+    val videoSpeed: StateFlow<Float> = _videoSpeed.asStateFlow()
 
-    fun updateSortPref(sort: String) {
-        viewModelScope.launch {
-            dataStore.edit { prefs -> prefs[SORT_KEY] = sort }
-        }
-    }
+    private val _isFlipped = MutableStateFlow(false)
+    val isFlipped: StateFlow<Boolean> = _isFlipped.asStateFlow()
 
-    fun updateViewModePref(viewMode: String) {
-        viewModelScope.launch {
-            dataStore.edit { prefs -> prefs[VIEW_MODE_KEY] = viewMode }
-        }
-    }
-
-    // Secure Preferences for Private Folder PIN and Recovery Email
-    private val securePrefs by lazy {
-        try {
-            val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-
-            EncryptedSharedPreferences.create(
-                "secure_aura_player_prefs",
-                masterKeyAlias,
-                application,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
-        } catch (e: Exception) {
-            Log.e("MediaViewModel", "Error creating EncryptedSharedPreferences: ${e.message}")
-            application.getSharedPreferences("fallback_secure_prefs", Context.MODE_PRIVATE)
-        }
-    }
-
-    private val _isPrivateFolderLocked = MutableStateFlow(true)
-    val isPrivateFolderLocked: StateFlow<Boolean> = _isPrivateFolderLocked.asStateFlow()
-
-    fun lockPrivateFolder() {
-        _isPrivateFolderLocked.value = true
-    }
-
-    fun unlockPrivateFolder(pin: String): Boolean {
-        val savedPin = securePrefs.getString("private_pin", null)
-        if (savedPin == pin) {
-            _isPrivateFolderLocked.value = false
-            return true
-        }
-        return false
-    }
-
-    fun hasPrivatePin(): Boolean {
-        return securePrefs.getString("private_pin", null) != null
-    }
-
-    fun setPrivatePin(pin: String, recoveryEmail: String) {
-        securePrefs.edit()
-            .putString("private_pin", pin)
-            .putString("recovery_email", recoveryEmail)
-            .apply()
-        _isPrivateFolderLocked.value = false
-    }
-
-    fun getRecoveryEmail(): String? {
-        return securePrefs.getString("recovery_email", null)
-    }
-
-    fun checkRecoveryEmail(email: String): Boolean {
-        val savedEmail = securePrefs.getString("recovery_email", null)
-        return email.trim().equals(savedEmail?.trim(), ignoreCase = true)
-    }
-
-    fun resetPinWithRecovery(email: String, newPin: String): Boolean {
-        if (checkRecoveryEmail(email)) {
-            securePrefs.edit().putString("private_pin", newPin).apply()
-            _isPrivateFolderLocked.value = false
-            return true
-        }
-        return false
-    }
-
-    fun togglePrivateState(id: Long, isPrivate: Boolean) {
-        viewModelScope.launch {
-            repository.updatePrivateState(id, isPrivate)
-        }
-    }
-
-    // Searching and filtering
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
-
-    private val _isScanning = MutableStateFlow(false)
-    val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
+    private val _isHwAccelerationEnabled = MutableStateFlow(true)
+    val isHwAccelerationEnabled: StateFlow<Boolean> = _isHwAccelerationEnabled.asStateFlow()
 
     // Sleep Timer
-    private val _sleepTimeRemaining = MutableStateFlow(0L) // in seconds
-    val sleepTimeRemaining: StateFlow<Long> = _sleepTimeRemaining.asStateFlow()
-    
-    private var sleepCountDownTimer: CountDownTimer? = null
+    private val _sleepTimerText = MutableStateFlow("موقد النوم")
+    val sleepTimerText: StateFlow<String> = _sleepTimerText.asStateFlow()
+
+    private val _isSleepTimerActive = MutableStateFlow(false)
+    val isSleepTimerActive: StateFlow<Boolean> = _isSleepTimerActive.asStateFlow()
+
+    private var countDownTimer: CountDownTimer? = null
+    private var progressJob: Job? = null
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as MusicService.MusicBinder
+            musicService = binder.getService()
+            _isServiceBound.value = true
+            observeServicePlayer()
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            musicService = null
+            _isServiceBound.value = false
+        }
+    }
 
     init {
-        // Run initial scan to populate database with local + demo media
-        scanMedia()
+        // Bind to Service
+        Intent(context, MusicService::class.java).also { intent ->
+            context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        }
+        loadMediaFiles()
     }
 
-    fun scanMedia() {
+    fun loadMediaFiles() {
         viewModelScope.launch {
-            _isScanning.value = true
-            repository.scanLocalMedia()
-            _isScanning.value = false
+            _isLoading.value = true
+            val loadedSongs = withContext(Dispatchers.IO) {
+                MediaLoader.loadSongs(context)
+            }
+            val loadedVideos = withContext(Dispatchers.IO) {
+                MediaLoader.loadVideos(context)
+            }
+            _songs.value = loadedSongs
+            _videos.value = loadedVideos
+            _isLoading.value = false
         }
     }
 
-    fun updateSearchQuery(query: String) {
-        _searchQuery.value = query
-    }
-
-    fun toggleFavorite(mediaId: Long, isFav: Boolean) {
-        viewModelScope.launch {
-            repository.updateFavorite(mediaId, isFav)
-        }
-    }
-
-    fun deleteMedia(id: Long) {
-        viewModelScope.launch {
-            repository.deleteMedia(id)
-        }
-    }
-
-    fun selectMedia(media: MediaFile) {
-        playerManager.play(media)
-    }
-
-    fun updateDecoderMode(id: Long, decoderMode: String) {
-        viewModelScope.launch {
-            repository.updateDecoderMode(id, decoderMode)
-            val current = playerManager.currentMedia.value
-            if (current != null && current.id == id) {
-                playerManager.setCurrentMedia(current.copy(decoderMode = decoderMode))
+    private fun observeServicePlayer() {
+        progressJob?.cancel()
+        progressJob = viewModelScope.launch {
+            while (true) {
+                val player = musicService?.exoPlayer
+                if (player != null) {
+                    _isPlayingAudio.value = player.isPlaying
+                    _audioPositionMs.value = player.currentPosition
+                    
+                    val duration = player.duration
+                    if (duration > 0) {
+                        _audioProgress.value = player.currentPosition.toFloat() / duration
+                    } else {
+                        _audioProgress.value = 0f
+                    }
+                }
+                delay(200)
             }
         }
     }
 
-    fun updateSubtitlePath(id: Long, subtitlePath: String) {
-        viewModelScope.launch {
-            repository.updateSubtitlePath(id, subtitlePath)
-            val current = playerManager.currentMedia.value
-            if (current != null && current.id == id) {
-                playerManager.setCurrentMedia(current.copy(subtitlePath = subtitlePath))
-            }
+    fun playSong(song: Song) {
+        _currentSong.value = song
+        
+        // Ensure service is running
+        val intent = Intent(context, MusicService::class.java)
+        context.startService(intent)
+        
+        musicService?.playSong(song)
+        _isPlayingAudio.value = true
+
+        // Load lyrics
+        viewModelScope.launch(Dispatchers.IO) {
+            val lrc = LyricsParser.parseLrc(song.filePath)
+            _lrcLines.value = lrc
         }
     }
 
-    fun saveHistoryProgress(mediaId: Long, progress: Long, duration: Long) {
-        viewModelScope.launch {
-            repository.insertHistory(mediaId, progress, duration)
+    fun togglePlayPauseAudio() {
+        musicService?.togglePlayPause()
+        val isPlaying = musicService?.exoPlayer?.isPlaying ?: false
+        _isPlayingAudio.value = isPlaying
+    }
+
+    fun playNext() {
+        val currentList = _songs.value
+        val current = _currentSong.value ?: return
+        val currentIndex = currentList.indexOfFirst { it.id == current.id }
+        if (currentIndex != -1 && currentIndex < currentList.size - 1) {
+            playSong(currentList[currentIndex + 1])
+        } else if (currentList.isNotEmpty()) {
+            playSong(currentList[0])
         }
     }
 
-    // Playlists Custom Functions
-    fun createPlaylist(name: String) {
-        viewModelScope.launch {
-            repository.createPlaylist(name)
+    fun playPrevious() {
+        val currentList = _songs.value
+        val current = _currentSong.value ?: return
+        val currentIndex = currentList.indexOfFirst { it.id == current.id }
+        if (currentIndex > 0) {
+            playSong(currentList[currentIndex - 1])
+        } else if (currentList.isNotEmpty()) {
+            playSong(currentList[currentList.size - 1])
         }
     }
 
-    fun deletePlaylist(id: Long) {
-        viewModelScope.launch {
-            repository.deletePlaylist(id)
+    fun seekAudio(progress: Float) {
+        val player = musicService?.exoPlayer ?: return
+        val duration = player.duration
+        if (duration > 0) {
+            val targetPosition = (progress * duration).toLong()
+            player.seekTo(targetPosition)
+            _audioPositionMs.value = targetPosition
+            _audioProgress.value = progress
         }
     }
 
-    fun addVideoToPlaylist(playlistId: Long, mediaId: Long) {
-        viewModelScope.launch {
-            repository.addToPlaylist(playlistId, mediaId)
-        }
+    // Video options
+    fun setVideoSpeed(speed: Float) {
+        _videoSpeed.value = speed
     }
 
-    fun getPlaylistMedia(playlistId: Long): Flow<List<MediaFile>> {
-        return repository.getPlaylistMedia(playlistId)
+    fun toggleHorizontalFlip() {
+        _isFlipped.value = !_isFlipped.value
     }
 
-    // Sleep Timer Functions
-    fun startSleepTimer(minutes: Int) {
-        sleepCountDownTimer?.cancel()
+    fun toggleHwAcceleration() {
+        _isHwAccelerationEnabled.value = !_isHwAccelerationEnabled.value
+    }
+
+    fun updateSubtitleStyle(style: SubtitleStyle) {
+        _subtitleStyle.value = style
+    }
+
+    // Sleep Timer helper
+    fun setSleepTimer(minutes: Int) {
+        countDownTimer?.cancel()
         if (minutes <= 0) {
-            _sleepTimeRemaining.value = 0
+            _isSleepTimerActive.value = false
+            _sleepTimerText.value = "موقد النوم"
             return
         }
-        
-        val totalMs = minutes * 60000L
-        _sleepTimeRemaining.value = totalMs / 1000
-        
-        sleepCountDownTimer = object : CountDownTimer(totalMs, 1000) {
+
+        _isSleepTimerActive.value = true
+        val timeMs = minutes * 60 * 1000L
+
+        countDownTimer = object : CountDownTimer(timeMs, 1000) {
             override fun onTick(millisUntilFinished: Long) {
-                _sleepTimeRemaining.value = millisUntilFinished / 1000
+                val sec = (millisUntilFinished / 1000) % 60
+                val min = (millisUntilFinished / 1000) / 60
+                _sleepTimerText.value = String.format("%02d:%02d", min, sec)
             }
 
             override fun onFinish() {
-                _sleepTimeRemaining.value = 0
-                playerManager.getPlayer().pause()
-                Log.d("MediaViewModel", "Sleep timer finished. Playback paused.")
+                _isSleepTimerActive.value = false
+                _sleepTimerText.value = "موقد النوم"
+                // Pause all media
+                musicService?.exoPlayer?.pause()
+                _isPlayingAudio.value = false
             }
         }.start()
     }
 
-    fun cancelSleepTimer() {
-        sleepCountDownTimer?.cancel()
-        _sleepTimeRemaining.value = 0
-    }
-
-    fun clearHistory() {
-        viewModelScope.launch {
-            repository.clearHistory()
-        }
-    }
-
     override fun onCleared() {
         super.onCleared()
-        sleepCountDownTimer?.cancel()
-        playerManager.release()
+        progressJob?.cancel()
+        countDownTimer?.cancel()
+        try {
+            context.unbindService(serviceConnection)
+        } catch (e: Exception) {
+            // ignore
+        }
     }
 }
