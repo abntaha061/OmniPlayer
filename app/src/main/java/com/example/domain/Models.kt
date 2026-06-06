@@ -26,7 +26,10 @@ data class VideoFile(
     val duration: Long,
     val size: Long,
     val videoCodec: String = "H.264",
-    val audioCodec: String = "AAC"
+    val audioCodec: String = "AAC",
+    val dateString: String = "2026-04-11",
+    val resolution: String = "1080p",
+    val fps: Int = 60
 )
 
 data class SubtitleStyle(
@@ -35,4 +38,12 @@ data class SubtitleStyle(
     val backgroundColor: Color = Color.Black.copy(alpha = 0.5f),
     val fontFamily: String = "Cairo", // Cairo, Tajawal, Arial, Georgia
     val position: String = "Bottom" // Top, Center, Bottom
+)
+
+data class VideoFolder(
+    val name: String,
+    val count: Int,
+    val size: String,
+    val badge: Int = 0,
+    val iconType: String = "folder" // "folder", "camera", "movie", "whatsapp", "rec"
 )

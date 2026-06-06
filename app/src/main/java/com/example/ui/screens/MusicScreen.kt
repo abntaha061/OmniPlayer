@@ -142,7 +142,7 @@ fun MusicScreen(
                 )
             } else {
                 Text(
-                    text = "Aura Hi-Res Audio",
+                    text = "PurePlayer",
                     color = Color.White,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,

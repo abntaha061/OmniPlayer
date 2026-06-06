@@ -55,6 +55,7 @@ import com.example.ui.screens.MeScreen
 import com.example.ui.screens.MusicScreen
 import com.example.ui.screens.VideoPlayerScreen
 import com.example.ui.screens.VideosScreen
+import com.example.ui.screens.FolderVideosScreen
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
@@ -260,6 +261,21 @@ class MainActivity : ComponentActivity() {
                 ) {
                     composable("videos") {
                         VideosScreen(navController = navController, viewModel = viewModel)
+                    }
+
+                    composable(
+                        route = "folder_videos/{folderName}",
+                        arguments = listOf(
+                            navArgument("folderName") { type = NavType.StringType }
+                        )
+                    ) { backStackEntry ->
+                        val encodedFolder = backStackEntry.arguments?.getString("folderName") ?: ""
+                        val decodedFolder = URLDecoder.decode(encodedFolder, StandardCharsets.UTF_8.toString())
+                        FolderVideosScreen(
+                            folderName = decodedFolder,
+                            navController = navController,
+                            viewModel = viewModel
+                        )
                     }
 
                     composable("music") {

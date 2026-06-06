@@ -16,6 +16,7 @@ import com.example.domain.LrcLine
 import com.example.domain.Song
 import com.example.domain.SubtitleStyle
 import com.example.domain.VideoFile
+import com.example.domain.VideoFolder
 import com.example.player.MusicService
 import com.example.utils.LyricsParser
 import com.example.utils.MediaLoader
@@ -31,6 +32,56 @@ import kotlinx.coroutines.withContext
 class MediaViewModel(application: Application) : AndroidViewModel(application) {
 
     private val context = application.applicationContext
+
+    // Premium MX Player View State Customization (cyan accent bindings)
+    private val _displayMode = MutableStateFlow("List") // "List", "Grid"
+    val displayMode: StateFlow<String> = _displayMode.asStateFlow()
+
+    private val _sortBy = MutableStateFlow("Date") // "Title", "Date", "Size", "Duration" ...
+    val sortBy: StateFlow<String> = _sortBy.asStateFlow()
+
+    private val _sortOrder = MutableStateFlow("Newest") // "Newest", "Oldest"
+    val sortOrder: StateFlow<String> = _sortOrder.asStateFlow()
+
+    // Interactive toggleable fields
+    private val _showFileExtension = MutableStateFlow(true)
+    val showFileExtension: StateFlow<Boolean> = _showFileExtension.asStateFlow()
+
+    private val _showDuration = MutableStateFlow(true)
+    val showDuration: StateFlow<Boolean> = _showDuration.asStateFlow()
+
+    private val _showThumbnail = MutableStateFlow(true)
+    val showThumbnail: StateFlow<Boolean> = _showThumbnail.asStateFlow()
+
+    private val _showFrameRate = MutableStateFlow(true)
+    val showFrameRate: StateFlow<Boolean> = _showFrameRate.asStateFlow()
+
+    private val _showQuality = MutableStateFlow(true)
+    val showQuality: StateFlow<Boolean> = _showQuality.asStateFlow()
+
+    private val _showWatchTime = MutableStateFlow(true)
+    val showWatchTime: StateFlow<Boolean> = _showWatchTime.asStateFlow()
+
+    private val _showDate = MutableStateFlow(false)
+    val showDate: StateFlow<Boolean> = _showDate.asStateFlow()
+
+    private val _showSize = MutableStateFlow(true)
+    val showSize: StateFlow<Boolean> = _showSize.asStateFlow()
+
+    private val _showPath = MutableStateFlow(true)
+    val showPath: StateFlow<Boolean> = _showPath.asStateFlow()
+
+    // Mock Folders list
+    private val _foldersList = MutableStateFlow<List<VideoFolder>>(emptyList())
+    val foldersList: StateFlow<List<VideoFolder>> = _foldersList.asStateFlow()
+
+    // Active folder videos
+    private val _currentFolderVideos = MutableStateFlow<List<VideoFile>>(emptyList())
+    val currentFolderVideos: StateFlow<List<VideoFile>> = _currentFolderVideos.asStateFlow()
+
+    private var rawFolderVideos = listOf<VideoFile>()
+    var activeFolderName = ""
+        private set
 
     // Lists
     private val _songs = MutableStateFlow<List<Song>>(emptyList())
@@ -119,8 +170,138 @@ class MediaViewModel(application: Application) : AndroidViewModel(application) {
             }
             _songs.value = loadedSongs
             _videos.value = loadedVideos
+            
+            // Set up high fidelity folders list
+            _foldersList.value = listOf(
+                VideoFolder("#DeutschLernen_Netzwerk_Neu_A2_2026", 9, "٣٫٥ غيغابايت", 0, "folder"),
+                VideoFolder("#Netzwerk_Neu_A1_2026", 25, "٧٫٨ غيغابايت", 0, "folder"),
+                VideoFolder("#Netzwerk_Neu_A2_2026", 13, "٣٫٧ غيغابايت", 0, "folder"),
+                VideoFolder("Camera", 22, "٣٫٥ غيغابايت", 1, "camera"),
+                VideoFolder("Movies", 2, "٩٫٩ ميغابايت", 2, "movie"),
+                VideoFolder("Quick Share", 2, "٣٨ ميغابايت", 0, "folder"),
+                VideoFolder("Screen recordings", 11, "٩٣ ميغابايت", 11, "rec"),
+                VideoFolder("WhatsApp Business Video", 1, "٤٣ ميغابايت", 0, "whatsapp"),
+                VideoFolder("WhatsApp Video", 2, "١١ ميغابايت", 0, "whatsapp")
+            )
             _isLoading.value = false
         }
+    }
+
+    fun setDisplayMode(mode: String) { _displayMode.value = mode }
+    fun setSortBy(field: String) { _sortBy.value = field }
+    fun setSortOrder(order: String) { _sortOrder.value = order }
+
+    fun setShowFileExtension(v: Boolean) { _showFileExtension.value = v }
+    fun setShowDuration(v: Boolean) { _showDuration.value = v }
+    fun setShowThumbnail(v: Boolean) { _showThumbnail.value = v }
+    fun setShowFrameRate(v: Boolean) { _showFrameRate.value = v }
+    fun setShowQuality(v: Boolean) { _showQuality.value = v }
+    fun setShowWatchTime(v: Boolean) { _showWatchTime.value = v }
+    fun setShowDate(v: Boolean) { _showDate.value = v }
+    fun setShowSize(v: Boolean) { _showSize.value = v }
+    fun setShowPath(v: Boolean) { _showPath.value = v }
+
+    fun loadVideosForFolder(folderName: String) {
+        activeFolderName = folderName
+        rawFolderVideos = getMockVideosForFolder(folderName)
+        applySortingAndFilters()
+    }
+
+    fun applySortingAndFilters() {
+        val list = rawFolderVideos.toMutableList()
+        val isNewest = _sortOrder.value == "Newest"
+        
+        when (_sortBy.value) {
+            "Title", "العنوان" -> {
+                list.sortBy { it.title }
+                if (isNewest) list.reverse()
+            }
+            "Date", "التاريخ" -> {
+                list.sortBy { it.dateString }
+                if (isNewest) list.reverse()
+            }
+            "Duration", "المدة" -> {
+                list.sortBy { it.duration }
+                if (isNewest) list.reverse()
+            }
+            "Size", "الحجم" -> {
+                list.sortBy { it.size }
+                if (isNewest) list.reverse()
+            }
+            else -> {
+                list.sortBy { it.title }
+                if (isNewest) list.reverse()
+            }
+        }
+        _currentFolderVideos.value = list
+    }
+
+    private fun getMockVideosForFolder(folderName: String): List<VideoFile> {
+        val pathPrefix = "/storage/emulated/0/$folderName"
+        val sampleVideos = listOf(
+            VideoFile(1L, "٠٠٤١٥٨_٢٠٢٦٠٤١١", "$pathPrefix/٠٠٤١٥٨_٢٠٢٦٠٤١١.mp4", 14000L, 30932992L, "H.264", "AAC", "2026-04-11", "1080p", 60),
+            VideoFile(2L, "٠١٣٣٣١_٢٠٢٦٠٤١١", "$pathPrefix/٠١٣٣٣١_٢٠٢٦٠٤١١.mp4", 28000L, 60922368L, "H.264", "AAC", "2026-04-11", "1080p", 60),
+            VideoFile(3L, "٠١٣٥١٧_٢٠٢٦٠٤١١", "$pathPrefix/٠١٣٥١٧_٢٠٢٦٠٤١١.mp4", 30000L, 65326284L, "H.264", "AAC", "2026-04-11", "1080p", 60),
+            VideoFile(4L, "٠١٣٩٢٨_٢٠٢٦٠٤١١", "$pathPrefix/٠١٣٩٢٨_٢٠٢٦٠٤١١.mp4", 1000L, 1572864L, "H.264", "AAC", "2026-04-11", "720p", 30),
+            VideoFile(5L, "١٤١٦٠٣_٢٠٢٦٠٤١١", "$pathPrefix/١٤١٦٠٣_٢٠٢٦٠٤١١.mp4", 12000L, 26424115L, "H.264", "AAC", "2026-04-11", "1080p", 60),
+            VideoFile(6L, "١٩٤٨٢١_٢٠٢٦٠٤٢٤", "$pathPrefix/١٩٤٨٢١_٢٠٢٦٠٤٢٤.mp4", 48000L, 105277030L, "H.264", "AAC", "2026-04-24", "1080p", 60)
+        )
+        
+        val count = when (folderName) {
+            "#DeutschLernen_Netzwerk_Neu_A2_2026" -> 9
+            "#Netzwerk_Neu_A1_2026" -> 25
+            "#Netzwerk_Neu_A2_2026" -> 13
+            "Camera" -> 22
+            "Movies" -> 2
+            "Quick Share" -> 2
+            "Screen recordings" -> 11
+            "WhatsApp Business Video" -> 1
+            "WhatsApp Video" -> 2
+            else -> 5
+        }
+        
+        val list = mutableListOf<VideoFile>()
+        for (i in 0 until count) {
+            val baseIndex = i % sampleVideos.size
+            val baseVideo = sampleVideos[baseIndex]
+            if (i < sampleVideos.size) {
+                // Return pristine requested entries first
+                list.add(
+                    VideoFile(
+                        id = (baseVideo.id + i * 10).toLong(),
+                        title = baseVideo.title,
+                        filePath = baseVideo.filePath,
+                        duration = baseVideo.duration,
+                        size = baseVideo.size,
+                        videoCodec = baseVideo.videoCodec,
+                        audioCodec = baseVideo.audioCodec,
+                        dateString = baseVideo.dateString,
+                        resolution = baseVideo.resolution,
+                        fps = baseVideo.fps
+                    )
+                )
+            } else {
+                // Generate high fidelity extra entries using Arabic numeric formatting if helpful
+                val sizeBytes = baseVideo.size + (i * 1239840L)
+                val day = 10 + (i % 18)
+                val name = "١${i}٤${i}٣_٢٠٢٦٠٤$day"
+                list.add(
+                    VideoFile(
+                        id = (100L + i * 5),
+                        title = name,
+                        filePath = "$pathPrefix/$name.mp4",
+                        duration = baseVideo.duration + (i * 3000L),
+                        size = sizeBytes,
+                        videoCodec = if (i % 2 == 0) "H.264" else "HEVC",
+                        audioCodec = if (i % 3 == 0) "MP3" else "AAC",
+                        dateString = "2026-04-$day",
+                        resolution = if (i % 2 == 0) "1080p" else "720p",
+                        fps = if (i % 2 == 0) 60 else 30
+                    )
+                )
+            }
+        }
+        return list
     }
 
     private fun observeServicePlayer() {
