@@ -69,7 +69,7 @@ fun MeScreen(
     ) {
         // App header bar
         Text(
-            text = "Aura Hi-Res Audio",
+            text = "PurePlayer (PPlayer)",
             color = Color.White,
             fontSize = 22.sp,
             fontWeight = FontWeight.Bold,
@@ -98,7 +98,7 @@ fun MeScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         Text(
-            text = "مستمع أورا Aura Listener",
+            text = "مستمع PurePlayer",
             color = Color.White,
             fontSize = 18.sp,
             fontWeight = FontWeight.Bold,
@@ -106,7 +106,7 @@ fun MeScreen(
         )
 
         Text(
-            text = "مستكشف الصوتيات والصور بجودة Hi-Res",
+            text = "مستكشف الصوتيات ومقاطع الفيديو بجودة عالية",
             color = Color.White.copy(alpha = 0.5f),
             fontSize = 12.sp,
             textAlign = TextAlign.Center

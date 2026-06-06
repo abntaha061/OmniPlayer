@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Aura Hi-Res Audio"
+rootProject.name = "PPlayer"
 include(":app")
